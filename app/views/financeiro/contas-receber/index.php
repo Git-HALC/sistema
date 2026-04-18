@@ -212,7 +212,12 @@
                                                     <i class="fas fa-undo"></i>
                                                 </button>
                                             <?php endif; ?>
-                                            <?php if ($conta['status'] === 'PENDENTE' || $conta['status'] === 'VENCIDO'): ?>
+                                            <?php $ehProtegido = !empty($conta['protegido']); ?>
+                                            <?php if ($ehProtegido): ?>
+                                                <span class="btn btn-outline-secondary disabled" title="Registro protegido (origem PDV). Não pode ser excluído.">
+                                                    <i class="fas fa-lock"></i>
+                                                </span>
+                                            <?php elseif ($conta['status'] === 'PENDENTE' || $conta['status'] === 'VENCIDO'): ?>
                                                 <a href="/sistema_dm/public/admin/financeiro/contas-receber.php?action=editar&id=<?php echo $conta['id']; ?>"
                                                    class="btn btn-outline-primary" title="Editar">
                                                     <i class="fas fa-edit"></i>
@@ -349,12 +354,18 @@
                                            class="btn btn-outline-primary btn-sm flex-fill">
                                             <i class="fas fa-edit"></i> Editar
                                         </a>
-                                        <button type="button" class="btn btn-outline-danger btn-sm btn-excluir flex-fill"
-                                                data-id="<?php echo $conta['id']; ?>"
-                                                data-origem="<?php echo htmlspecialchars((string)($conta['origem'] ?? '')); ?>"
-                                                data-orcamento-id="<?php echo (int)($conta['orcamento_id'] ?? 0); ?>">
-                                            <i class="fas fa-trash"></i> Excluir
-                                        </button>
+                                        <?php if (!empty($conta['protegido'])): ?>
+                                            <span class="btn btn-outline-secondary btn-sm flex-fill disabled" title="Protegido">
+                                                <i class="fas fa-lock"></i> Protegido
+                                            </span>
+                                        <?php else: ?>
+                                            <button type="button" class="btn btn-outline-danger btn-sm btn-excluir flex-fill"
+                                                    data-id="<?php echo $conta['id']; ?>"
+                                                    data-origem="<?php echo htmlspecialchars((string)($conta['origem'] ?? '')); ?>"
+                                                    data-orcamento-id="<?php echo (int)($conta['orcamento_id'] ?? 0); ?>">
+                                                <i class="fas fa-trash"></i> Excluir
+                                            </button>
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                 </div>
                             </div>

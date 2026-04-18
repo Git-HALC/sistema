@@ -161,9 +161,13 @@
                                         <td><?php echo htmlspecialchars($mov['descricao'] ?? '-'); ?></td>
                                         <td><?php echo htmlspecialchars($mov['usuario_nome'] ?? '-'); ?></td>
                                         <td class="text-center">
-                                            <?php if (empty($mov['conta_receber_id']) && empty($mov['conta_pagar_id'])): ?>
+                                            <?php if (!empty($mov['protegido'])): ?>
+                                                <span class="btn btn-outline-secondary btn-sm disabled" title="Movimentação protegida (origem PDV). Cancele a venda em vez de excluir.">
+                                                    <i class="fas fa-lock"></i>
+                                                </span>
+                                            <?php elseif (empty($mov['conta_receber_id']) && empty($mov['conta_pagar_id'])): ?>
                                                 <div class="btn-group btn-group-sm" role="group">
-                                                    <button type="button" class="btn btn-primary btn-editar" 
+                                                    <button type="button" class="btn btn-primary btn-editar"
                                                     data-id="<?php echo $mov['id']; ?>" 
                                                     data-tipo="<?php echo $mov['tipo']; ?>" 
                                                     data-conta-id="<?php echo $mov['conta_id']; ?>" 
@@ -219,9 +223,15 @@
                                     </div>
                                 </div>
                                 
-                                <?php if (empty($mov['conta_receber_id']) && empty($mov['conta_pagar_id'])): ?>
+                                <?php if (!empty($mov['protegido'])): ?>
+                                    <div class="mt-2">
+                                        <span class="btn btn-outline-secondary btn-sm disabled w-100">
+                                            <i class="fas fa-lock"></i> Protegida
+                                        </span>
+                                    </div>
+                                <?php elseif (empty($mov['conta_receber_id']) && empty($mov['conta_pagar_id'])): ?>
                                     <div class="d-flex gap-1">
-                                        <button type="button" class="btn btn-sm btn-primary btn-editar flex-fill" 
+                                        <button type="button" class="btn btn-sm btn-primary btn-editar flex-fill"
                                                 data-id="<?php echo $mov['id']; ?>" 
                                                 data-tipo="<?php echo $mov['tipo']; ?>" 
                                                 data-conta-id="<?php echo $mov['conta_id']; ?>" 

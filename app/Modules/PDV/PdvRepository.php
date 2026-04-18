@@ -115,18 +115,18 @@ final class PdvRepository
                 caixa_id,
                 usuario_id,
                 tipo,
-                referencia_id,
+                pedido_id,
                 valor_total,
                 forma_pagamento
             ) VALUES (
                 :caixa_id,
                 :usuario_id,
                 :tipo,
-                CAST(:referencia_id AS uuid),
+                CAST(:pedido_id AS uuid),
                 :valor_total,
                 :forma_pagamento
             )
-            ON CONFLICT (tipo, referencia_id)
+            ON CONFLICT (pedido_id)
             DO UPDATE SET
                 caixa_id = EXCLUDED.caixa_id,
                 usuario_id = EXCLUDED.usuario_id,
@@ -138,7 +138,7 @@ final class PdvRepository
             ':caixa_id' => $caixaId,
             ':usuario_id' => $usuarioId,
             ':tipo' => $tipo,
-            ':referencia_id' => $referenciaId,
+            ':pedido_id' => $referenciaId,
             ':valor_total' => round($valorTotal, 2),
             ':forma_pagamento' => $formaPagamento,
         ]);
@@ -225,28 +225,19 @@ final class PdvRepository
         $stmt = $this->pdo->prepare(<<<'SQL'
             SELECT l.id,
                    l.tipo,
-                   l.referencia_id,
+                   l.pedido_id AS referencia_id,
                    l.valor_total,
                    l.forma_pagamento,
                    l.created_at,
                    ul.nome AS usuario_lancou,
-                   COALESCE(p.numero::text, s.numero::text) AS numero_referencia,
-                   COALESCE(cp.nome, cs.nome, 'Cliente avulso') AS cliente_nome,
-                   COALESCE(NULLIF(p.observacoes, ''), s.servico_nome, '') AS descricao,
-                   CASE
-                       WHEN l.tipo = 'pedido' THEN 'Pedido'
-                       ELSE 'Servico'
-                   END AS tipo_label
+                   p.numero::text AS numero_referencia,
+                   COALESCE(cp.nome, 'Cliente avulso') AS cliente_nome,
+                   COALESCE(NULLIF(p.observacoes, ''), '') AS descricao,
+                   'Pedido' AS tipo_label
               FROM pdv_lancamentos l
               INNER JOIN usuarios ul ON ul.id = l.usuario_id
-              LEFT JOIN pedidos p
-                     ON l.tipo = 'pedido'
-                    AND p.id = l.referencia_id
+              LEFT JOIN pedidos p ON p.id = l.pedido_id
               LEFT JOIN clientes cp ON cp.id = p.cliente_id
-              LEFT JOIN servicos s
-                     ON l.tipo = 'servico'
-                    AND s.id = l.referencia_id
-              LEFT JOIN clientes cs ON cs.id = s.cliente_id
              WHERE l.caixa_id = :caixa_id
              ORDER BY l.created_at ASC, l.id ASC
         SQL);

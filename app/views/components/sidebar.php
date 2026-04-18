@@ -81,17 +81,12 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
             </li>
             <?php endif; ?>
 
-            <?php if ($can('orcamentos')): ?>
-            <li class="menu-item has-submenu">
-                <a href="#orcamentosSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="menu-link submenu-toggle" title="Orcamentos">
-                    <i class="fas fa-file-invoice menu-icon"></i>
-                    <span class="menu-text">Orcamentos</span>
-                    <i class="fas fa-chevron-down submenu-arrow"></i>
+            <?php if ($can('servicos')): ?>
+            <li class="menu-item">
+                <a href="<?php echo htmlspecialchars($url('admin/servicos.php')); ?>" class="menu-link" title="Serviços">
+                    <i class="fas fa-tools menu-icon"></i>
+                    <span class="menu-text">Serviços</span>
                 </a>
-                <ul class="submenu collapse" id="orcamentosSubmenu">
-                    <li><a href="<?php echo htmlspecialchars($url('admin/orcamentos.php?action=novo')); ?>" class="submenu-link"><i class="fas fa-plus"></i> Novo Orcamento</a></li>
-                    <li><a href="<?php echo htmlspecialchars($url('admin/orcamentos.php')); ?>" class="submenu-link"><i class="fas fa-list"></i> Lista de Orcamentos</a></li>
-                </ul>
             </li>
             <?php endif; ?>
 
@@ -124,7 +119,6 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
                     <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=listar')); ?>" class="submenu-link"><i class="fas fa-list"></i> NF-e Emitidas</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=faturaveis')); ?>" class="submenu-link"><i class="fas fa-plus"></i> Emitir NF-e</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=homologacao')); ?>" class="submenu-link"><i class="fas fa-vial"></i> Homologação</a></li>
-                    <li><a href="<?php echo htmlspecialchars($url('admin/fiscal-servico.php?action=index')); ?>" class="submenu-link"><i class="fas fa-file-signature"></i> Fiscal de Servicos</a></li>
                 </ul>
             </li>
             <?php endif; ?>
@@ -142,6 +136,7 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
                     <li><a href="<?php echo htmlspecialchars($url('admin/financeiro/contas-pagar.php')); ?>" class="submenu-link"><i class="fas fa-arrow-circle-up"></i> Contas a Pagar</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/financeiro/movimentacoes.php')); ?>" class="submenu-link"><i class="fas fa-exchange-alt"></i> Movimentacoes</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/financeiro/dre.php')); ?>" class="submenu-link"><i class="fas fa-chart-line"></i> DRE</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/financeiro/fluxo-caixa-projetado.php')); ?>" class="submenu-link"><i class="fas fa-chart-area"></i> Fluxo de Caixa Projetado</a></li>
                     <li class="submenu-group-label">Configuracoes</li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/financeiro/formas-pagamento.php')); ?>" class="submenu-link"><i class="fas fa-credit-card"></i> Formas de Pagamento</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/financeiro/contas.php')); ?>" class="submenu-link"><i class="fas fa-university"></i> Contas</a></li>
@@ -165,6 +160,8 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
                     <li><a href="<?php echo htmlspecialchars($url('admin/relatorios/financeiros/relatorio_historico_saldo.php')); ?>" class="submenu-link"><i class="fas fa-history"></i> Historico de Saldo</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/relatorios/financeiros/relatorio_contas_receber_status.php')); ?>" class="submenu-link"><i class="fas fa-file-invoice-dollar"></i> CR por Status</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/relatorios/financeiros/relatorio_contas_pagar_status.php')); ?>" class="submenu-link"><i class="fas fa-file-invoice"></i> CP por Status</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/relatorios/financeiros/relatorio_vendas_pdv.php')); ?>" class="submenu-link"><i class="fas fa-cash-register"></i> Vendas PDV</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/relatorios/financeiros/relatorio_vendas_pdv_por_item.php')); ?>" class="submenu-link"><i class="fas fa-ranking-star"></i> Vendas PDV por Item</a></li>
                     <?php endif; ?>
 
                     <?php if ($canRelPedidos): ?>

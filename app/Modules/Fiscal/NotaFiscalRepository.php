@@ -35,13 +35,8 @@ class NotaFiscalRepository
      */
     public function findByServicoId(string $servicoId): ?NotaFiscal
     {
-        $stmt = $this->pdo->prepare(
-            'SELECT * FROM ' . self::TABLE . ' WHERE servico_id = :servico_id ORDER BY created_at DESC LIMIT 1'
-        );
-        $stmt->execute([':servico_id' => $servicoId]);
-
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ? NotaFiscal::fromArray($row) : null;
+        // Desabilitado na auditoria 2026-04-18: pedido_nfe.servico_id removida.
+        return null;
     }
 
     /**
@@ -71,13 +66,12 @@ class NotaFiscalRepository
         $sql = "
             SELECT pn.*,
                    p.numero AS pedido_numero,
-                   s.numero AS servico_numero,
-                   COALESCE(p.valor_total, s.valor_total) AS valor_total,
-                   COALESCE(c.nome, s.nome_cliente) AS cliente_nome,
-                   CASE WHEN pn.servico_id IS NOT NULL THEN 'SERVICO' ELSE 'PEDIDO' END AS origem_tipo
+                   NULL::BIGINT AS servico_numero,
+                   p.valor_total AS valor_total,
+                   c.nome AS cliente_nome,
+                   'PEDIDO' AS origem_tipo
             FROM " . self::TABLE . " pn
             LEFT JOIN pedidos p ON p.id = pn.pedido_id
-            LEFT JOIN servicos s ON s.id = pn.servico_id
             LEFT JOIN clientes c ON c.id::text = p.cliente_id::text
             {$where}
             ORDER BY pn.created_at DESC, pn.numero_nfe DESC
@@ -107,7 +101,6 @@ class NotaFiscalRepository
             SELECT COUNT(*)
             FROM " . self::TABLE . " pn
             LEFT JOIN pedidos p ON p.id = pn.pedido_id
-            LEFT JOIN servicos s ON s.id = pn.servico_id
             LEFT JOIN clientes c ON c.id::text = p.cliente_id::text
             {$where}
         ");
@@ -134,15 +127,14 @@ class NotaFiscalRepository
 
         $stmt = $this->pdo->prepare("
             INSERT INTO " . self::TABLE . " (
-                id, pedido_id, servico_id, numero_nfe, chave_acesso, status, data_emissao, xml_nfe, created_at, updated_at
+                id, pedido_id, numero_nfe, chave_acesso, status, data_emissao, xml_nfe, created_at, updated_at
             ) VALUES (
-                :id, :pedido_id, :servico_id, :numero_nfe, :chave_acesso, :status, :data_emissao, :xml_nfe, NOW(), NOW()
+                :id, :pedido_id, :numero_nfe, :chave_acesso, :status, :data_emissao, :xml_nfe, NOW(), NOW()
             )
         ");
         $stmt->execute([
             ':id' => $id,
             ':pedido_id' => $data['pedido_id'] ?? null,
-            ':servico_id' => $data['servico_id'] ?? null,
             ':numero_nfe' => (int)$data['numero_nfe'],
             ':chave_acesso' => (string)$data['chave_acesso'],
             ':status' => strtoupper((string)$data['status']),

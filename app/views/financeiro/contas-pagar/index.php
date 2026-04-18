@@ -188,7 +188,11 @@
                                                     <i class="fas fa-undo"></i>
                                                 </button>
                                             <?php endif; ?>
-                                            <?php if ($conta['status'] === 'PENDENTE' || $conta['status'] === 'VENCIDO'): ?>
+                                            <?php if (!empty($conta['protegido'])): ?>
+                                                <span class="btn btn-outline-secondary disabled" title="Registro protegido">
+                                                    <i class="fas fa-lock"></i>
+                                                </span>
+                                            <?php elseif ($conta['status'] === 'PENDENTE' || $conta['status'] === 'VENCIDO'): ?>
                                                 <a href="/sistema_dm/public/admin/financeiro/contas-pagar.php?action=editar&id=<?php echo $conta['id']; ?>"
                                                    class="btn btn-outline-primary" title="Editar">
                                                     <i class="fas fa-edit"></i>
@@ -299,7 +303,11 @@
                                             <i class="fas fa-undo"></i> Estornar
                                         </button>
                                     <?php endif; ?>
-                                    <?php if ($conta['status'] === 'PENDENTE' || $conta['status'] === 'VENCIDO'): ?>
+                                    <?php if (!empty($conta['protegido'])): ?>
+                                        <span class="btn btn-outline-secondary btn-sm flex-fill disabled">
+                                            <i class="fas fa-lock"></i> Protegido
+                                        </span>
+                                    <?php elseif ($conta['status'] === 'PENDENTE' || $conta['status'] === 'VENCIDO'): ?>
                                         <a href="/sistema_dm/public/admin/financeiro/contas-pagar.php?action=editar&id=<?php echo $conta['id']; ?>"
                                            class="btn btn-outline-primary btn-sm flex-fill">
                                             <i class="fas fa-edit"></i> Editar

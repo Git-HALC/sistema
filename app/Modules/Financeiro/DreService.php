@@ -16,4 +16,9 @@ class DreService
 
         return $this->repo->gerar($dataInicio, $dataFim);
     }
+
+    public function gerarPorPeriodo(string $dataInicio, string $dataFim): array
+    {
+        return $this->repo->gerar($dataInicio, $dataFim);
+    }
 }

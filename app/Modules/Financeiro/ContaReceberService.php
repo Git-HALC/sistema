@@ -85,6 +85,10 @@ class ContaReceberService
     public function excluir(int $id): array
     {
         try {
+            $atual = $this->repo->buscarPorId($id);
+            if (is_array($atual) && !empty($atual['protegido'])) {
+                return ['ok' => false, 'erros' => ['Esta conta a receber é protegida (origem PDV) e não pode ser excluída. Use cancelamento.']];
+            }
             $this->repo->excluir($id);
             return ['ok' => true];
         } catch (NfeVinculadaException $e) {

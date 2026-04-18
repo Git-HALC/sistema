@@ -68,6 +68,10 @@ class ContaPagarService
     public function excluir(int $id): array
     {
         try {
+            $atual = $this->repo->buscarPorId($id);
+            if (is_array($atual) && !empty($atual['protegido'])) {
+                return ['ok' => false, 'erros' => ['Esta conta a pagar é protegida e não pode ser excluída.']];
+            }
             $this->repo->excluir($id);
             return ['ok' => true];
         } catch (RuntimeException $e) {

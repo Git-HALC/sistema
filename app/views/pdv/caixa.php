@@ -32,12 +32,23 @@ $statusClasse = match ($status) {
             <p class="text-muted mb-0">Painel rapido para operar o PDV com este caixa.</p>
         </div>
         <div class="d-flex flex-wrap gap-2">
+            <?php if ($status === 'aberto'): ?>
+                <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/venda')) ?>" class="btn btn-success">
+                    <i class="fas fa-bolt me-1"></i> Venda Rápida
+                </a>
+                <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/fluxo')) ?>" class="btn btn-warning">
+                    <i class="fas fa-columns me-1"></i> Fluxo de Vendas
+                </a>
+                <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/historico')) ?>" class="btn btn-outline-success">
+                    <i class="fas fa-list me-1"></i> Histórico
+                </a>
+            <?php endif; ?>
             <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/caixa/' . $caixaId . '/relatorio')) ?>" class="btn btn-outline-primary">
                 <i class="fas fa-file-alt me-1"></i> Relatorio
             </a>
             <?php if ($podeFechar): ?>
-                <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/caixa/' . $caixaId . '/fechar')) ?>" class="btn btn-primary">
-                    <i class="fas fa-lock me-1"></i> Fechar caixa
+                <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/conferencia')) ?>" class="btn btn-primary">
+                    <i class="fas fa-check-double me-1"></i> Conferir caixa
                 </a>
             <?php endif; ?>
         </div>

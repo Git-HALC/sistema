@@ -109,6 +109,33 @@ class DreRepository
             ];
         }
 
+        // Vendas PDV faturadas no periodo agrupadas por tipo de item (produto/servico)
+        $sqlPdv = "
+            SELECT
+                CASE WHEN i.tipo_item = 'SERVICO' THEN 'Vendas de Servicos (PDV)'
+                     ELSE 'Vendas de Produtos (PDV)' END AS categoria,
+                COALESCE(SUM(i.valor_total_item), 0) AS valor,
+                COUNT(DISTINCT v.id) AS quantidade
+              FROM pdv_vendas v
+              INNER JOIN pdv_venda_itens i ON i.venda_id = v.id
+             WHERE v.status = 'faturado'
+               AND DATE(v.created_at) BETWEEN :data_inicio AND :data_fim
+             GROUP BY 1
+        ";
+        $stmtPdv = $this->pdo->prepare($sqlPdv);
+        $stmtPdv->execute($params);
+        foreach ($stmtPdv->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $valor = (float)$row['valor'];
+            if ($valor <= 0) continue;
+            $dre['receita_bruta']['total'] += $valor;
+            $dre['receita_bruta']['detalhes'][] = [
+                'categoria' => (string)$row['categoria'],
+                'valor' => $valor,
+                'quantidade' => (int)$row['quantidade'],
+                'origem_pdv' => true,
+            ];
+        }
+
         // =====================================================================
         // 2. DEDUÇÕES
         // Origem: Movimentações de qualquer tipo com categoria Dedução

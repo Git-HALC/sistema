@@ -37,13 +37,22 @@ class DreController
 
     private function index(): void
     {
-        $mes = (int)($_GET['mes'] ?? date('m'));
-        $ano = (int)($_GET['ano'] ?? date('Y'));
+        $dataInicio = isset($_GET['data_inicio']) && $_GET['data_inicio'] !== '' ? (string)$_GET['data_inicio'] : null;
+        $dataFim = isset($_GET['data_fim']) && $_GET['data_fim'] !== '' ? (string)$_GET['data_fim'] : null;
 
-        $dre   = $this->service->gerar($mes, $ano);
+        if ($dataInicio && $dataFim) {
+            $dre = $this->service->gerarPorPeriodo($dataInicio, $dataFim);
+            $mes = (int)date('m', strtotime($dataInicio));
+            $ano = (int)date('Y', strtotime($dataInicio));
+        } else {
+            $mes = (int)($_GET['mes'] ?? date('m'));
+            $ano = (int)($_GET['ano'] ?? date('Y'));
+            $dre = $this->service->gerar($mes, $ano);
+        }
+
         $titulo = 'Demonstração de Resultado do Exercício (DRE)';
 
-        $this->view('financeiro/dre/index', compact('dre', 'mes', 'ano', 'titulo'));
+        $this->view('financeiro/dre/index', compact('dre', 'mes', 'ano', 'titulo', 'dataInicio', 'dataFim'));
     }
 
     private function exportarPdf(): void

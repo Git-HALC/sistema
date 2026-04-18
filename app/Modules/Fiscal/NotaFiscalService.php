@@ -157,6 +157,7 @@ class NotaFiscalService
      */
     public function validarServicoParaEmissao(string $servicoId): array
     {
+        throw new \RuntimeException('Emissao de NF-e a partir de servicos esta desabilitada (auditoria 2026-04-18). Aguarde o novo mini-modulo de Servicos.');
         $erros = [];
         $servico = $this->buscarServicoFiscal($servicoId);
 
@@ -485,6 +486,7 @@ class NotaFiscalService
      */
     public function emitirServico(string $servicoId): array
     {
+        throw new \RuntimeException('Emissao de NF-e a partir de servicos esta desabilitada (auditoria 2026-04-18). Aguarde o novo mini-modulo de Servicos.');
         $somenteDigitos = static fn (?string $valor): string => preg_replace('/\D+/', '', (string)$valor) ?? '';
         $texto = static fn (?string $valor, int $limite = 255): string => mb_substr(trim((string)$valor), 0, $limite);
 

@@ -1,1290 +1,169 @@
 -- ============================================================================
--- BANCO DE DADOS COMPLETO DO SISTEMA DE SUPORTE E FINANCEIRO
--- PostgreSQL 13+ com otimizacoes de performance
+-- cliente-base.sql (CONSOLIDADO 2026-04-18)
+-- Sistema DM - Template de banco para NOVO cliente (PostgreSQL 13+)
 -- ============================================================================
--- Versao: 2.0 (Otimizado)
--- Data: 2025
--- Changelog: 
--- - Adicionada extensao pg_trgm para busca textual otimizada
--- - Incorporados 6 Indices de otimizacao para Kanban (90% mais rapido)
--- - Removidas duplicacoes de categorias DRE
--- - Campos numero e status EM_PROCESSO incorporados na definicao de pedidos
--- - Indices simples substituidos por Indices otimizados com WHERE clauses
--- ============================================================================
-
--- Criacao do banco de dados (descomente se necessario)
--- CREATE DATABASE suporte;
--- \c suporte;
-
--- ============================================================================
--- EXTENSOES
+-- Este arquivo eh executado automaticamente pelo config/database.php quando
+-- o banco do tenant nao possui a tabela 'usuarios'. Cria toda a estrutura
+-- em um banco vazio. Para bancos existentes, use as migrations em
+-- database/migrations/ (controladas via tabela schema_migrations).
+--
+-- Secoes:
+--   1. Extensoes (uuid-ossp, pg_trgm)
+--   2. Tabelas e tipos (em ordem de dependencia de FKs)
+--   3. Indices
+--   4. Funcoes e triggers
+--   5. Views
+--   6. Dados iniciais (seeds)
+--   7. Usuario admin padrao
 -- ============================================================================
 
--- Extensao para geracao de UUIDs
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+--
+-- PostgreSQL database dump
+--
 
--- Extensao para busca textual com trigrams (necessaria para Indices GIN)
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+\restrict mkfFVUslMTV9U8wzgvHs9PzCTIoYV23DfLBPxabUbOh2xBbxOBBnSFY6CDgKVNM
 
--- ============================================================================
--- ATUALIZACAO DE TABELAS EXISTENTES (SE HOUVER)
--- ============================================================================
+-- Dumped from database version 13.22
+-- Dumped by pg_dump version 13.22
 
--- 1. Atualizar tabela niveis_acesso se nao tiver a constraint UNIQUE
-DO $$
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: pg_trgm; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching based on trigrams';
+
+
+--
+-- Name: uuid-ossp; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION "uuid-ossp"; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION "uuid-ossp" IS 'generate universally unique identifiers (UUIDs)';
+
+
+--
+-- Name: atualizar_saldo_conta_trigger(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.atualizar_saldo_conta_trigger() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'niveis_acesso') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
-                       WHERE table_name = 'niveis_acesso' AND constraint_type = 'UNIQUE') THEN
-            DELETE FROM niveis_acesso WHERE id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY nome ORDER BY id) as rn 
-                    FROM niveis_acesso
-                ) t WHERE rn > 1
-            );
-            ALTER TABLE niveis_acesso ADD CONSTRAINT niveis_acesso_nome_unique UNIQUE (nome);
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.afeta_saldo THEN
+            IF NEW.tipo = 'Entrada' THEN
+                UPDATE contas SET saldo_atual = saldo_atual + NEW.valor WHERE id = NEW.conta_id;
+            ELSE
+                UPDATE contas SET saldo_atual = saldo_atual - NEW.valor WHERE id = NEW.conta_id;
+            END IF;
+        END IF;
+    ELSIF TG_OP = 'DELETE' THEN
+        IF OLD.afeta_saldo THEN
+            IF OLD.tipo = 'Entrada' THEN
+                UPDATE contas SET saldo_atual = saldo_atual - OLD.valor WHERE id = OLD.conta_id;
+            ELSE
+                UPDATE contas SET saldo_atual = saldo_atual + OLD.valor WHERE id = OLD.conta_id;
+            END IF;
         END IF;
     END IF;
-END $$;
 
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'formas_pagamento') THEN
-        IF EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = 'formas_pagamento'
-              AND column_name = 'tipo'
-              AND character_maximum_length IS NOT NULL
-              AND character_maximum_length < 3
-        ) THEN
-            ALTER TABLE formas_pagamento ALTER COLUMN tipo TYPE VARCHAR(3);
-        END IF;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'formas_pagamento' AND column_name = 'adquirente_id'
-        ) THEN
-            ALTER TABLE formas_pagamento ADD COLUMN adquirente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL;
-        END IF;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'formas_pagamento' AND column_name = 'taxa'
-        ) THEN
-            ALTER TABLE formas_pagamento ADD COLUMN taxa NUMERIC(10,4) NOT NULL DEFAULT 0;
-        END IF;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'formas_pagamento' AND column_name = 'prazo_dias'
-        ) THEN
-            ALTER TABLE formas_pagamento ADD COLUMN prazo_dias INTEGER NOT NULL DEFAULT 0;
-        END IF;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_name = 'formas_pagamento' AND column_name = 'conta_id'
-        ) THEN
-            ALTER TABLE formas_pagamento ADD COLUMN conta_id INTEGER;
-        END IF;
-
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname = 'formas_pagamento_conta_id_fkey'
-        ) THEN
-            ALTER TABLE formas_pagamento
-                ADD CONSTRAINT formas_pagamento_conta_id_fkey
-                FOREIGN KEY (conta_id) REFERENCES contas(id) ON DELETE SET NULL;
-        END IF;
+    IF TG_OP = 'INSERT' THEN
+        RETURN NEW;
     END IF;
-END $$;
-
--- 2. Atualizar tabela usuarios se nao tiver a constraint UNIQUE no email
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'usuarios') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
-                       WHERE table_name = 'usuarios' AND constraint_type = 'UNIQUE') THEN
-            DELETE FROM usuarios WHERE id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY id) as rn 
-                    FROM usuarios
-                ) t WHERE rn > 1
-            );
-            ALTER TABLE usuarios ADD CONSTRAINT usuarios_email_unique UNIQUE (email);
-        END IF;
-    END IF;
-END $$;
-
--- 3. Atualizar tabela clientes se nao tiver a constraint UNIQUE no email
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'clientes') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
-                       WHERE table_name = 'clientes' AND constraint_type = 'UNIQUE') THEN
-            DELETE FROM clientes WHERE id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY email ORDER BY id) as rn 
-                    FROM clientes
-                ) t WHERE rn > 1
-            );
-            ALTER TABLE clientes ADD CONSTRAINT clientes_email_unique UNIQUE (email);
-        END IF;
-    END IF;
-END $$;
-
--- 3.1 Ajustar estrutura de clientes e remover legado de empresa
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'clientes') THEN
-        IF NOT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = 'clientes' AND column_name = 'cpf_cnpj'
-        ) THEN
-            ALTER TABLE clientes ADD COLUMN cpf_cnpj VARCHAR(20);
-        END IF;
-
-        ALTER TABLE clientes DROP COLUMN IF EXISTS empresa;
-    END IF;
-
-END $$;
-
--- 4. Atualizar tabela configuracoes se nao tiver a constraint UNIQUE na chave
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'configuracoes') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
-                       WHERE table_name = 'configuracoes' AND constraint_type = 'UNIQUE') THEN
-            DELETE FROM configuracoes WHERE id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY chave ORDER BY id) as rn 
-                    FROM configuracoes
-                ) t WHERE rn > 1
-            );
-            ALTER TABLE configuracoes ADD CONSTRAINT configuracoes_chave_unique UNIQUE (chave);
-        END IF;
-    END IF;
-END $$;
-
--- 5. Atualizar tabela formas_pagamento se nao tiver a constraint UNIQUE no nome
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'formas_pagamento') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints 
-                       WHERE table_name = 'formas_pagamento' AND constraint_type = 'UNIQUE') THEN
-            DELETE FROM formas_pagamento WHERE id IN (
-                SELECT id FROM (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY nome ORDER BY id) as rn 
-                    FROM formas_pagamento
-                ) t WHERE rn > 1
-            );
-            ALTER TABLE formas_pagamento ADD CONSTRAINT formas_pagamento_nome_unique UNIQUE (nome);
-        END IF;
-    END IF;
-END $$;
-
--- 6. Atualizar tabela categorias_dre - a mais importante
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'categorias_dre') THEN
-        -- Remover constraints antigas se existirem
-        BEGIN
-            ALTER TABLE categorias_dre DROP CONSTRAINT IF EXISTS categorias_dre_tipo_check;
-        EXCEPTION WHEN OTHERS THEN NULL; END;
-        
-        BEGIN
-            ALTER TABLE categorias_dre DROP CONSTRAINT IF EXISTS categorias_dre_nome_unique;
-        EXCEPTION WHEN OTHERS THEN NULL; END;
-        
-        -- Remover duplicados
-        DELETE FROM categorias_dre WHERE id IN (
-            SELECT id FROM (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY nome ORDER BY id) as rn 
-                FROM categorias_dre
-            ) t WHERE rn > 1
-        );
-        
-        -- Adicionar novas constraints
-        BEGIN
-            ALTER TABLE categorias_dre ADD CONSTRAINT categorias_dre_nome_unique UNIQUE (nome);
-        EXCEPTION WHEN OTHERS THEN NULL; END;
-        
-        BEGIN
-            ALTER TABLE categorias_dre 
-            ADD CONSTRAINT categorias_dre_tipo_check 
-            CHECK (tipo IN ('Receita', 'Despesa', 'Deducao', 'CPV', 'Despesa Operacional', 'Despesa Financeira', 'Tributo', 'Outras'));
-        EXCEPTION WHEN OTHERS THEN NULL; END;
-    END IF;
-EXCEPTION WHEN OTHERS THEN NULL;
-END $$;
-
--- 7. Atualizar tabela contas_pagar - adicionar cliente_id se nao existir
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'contas_pagar') THEN
-        IF NOT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = 'contas_pagar' AND column_name = 'cliente_id'
-        ) THEN
-            ALTER TABLE contas_pagar ADD COLUMN cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL;
-        END IF;
-    END IF;
-END $$;
-
--- 7.1 Atualizar tabela contas_receber - adicionar forma_pagamento_id se nao existir
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'contas_receber') THEN
-        IF NOT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = 'contas_receber' AND column_name = 'forma_pagamento_id'
-        ) THEN
-            ALTER TABLE contas_receber ADD COLUMN forma_pagamento_id INTEGER REFERENCES formas_pagamento(id) ON DELETE SET NULL;
-        END IF;
-    END IF;
-END $$;
-
--- ============================================================================
--- CRIACAO DE TABELAS (SE NAO EXISTIREM)
--- ============================================================================
-
--- Tabela: niveis_acesso
-CREATE TABLE IF NOT EXISTS niveis_acesso (
-    id SERIAL PRIMARY KEY,
-    nome VARCHAR(50) NOT NULL UNIQUE,
-    descricao TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela: usuarios
-CREATE TABLE IF NOT EXISTS usuarios (
-    id SERIAL PRIMARY KEY,
-    uuid UUID DEFAULT uuid_generate_v4(),
-    nome VARCHAR(100) NOT NULL,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    senha VARCHAR(255) NOT NULL,
-    telefone VARCHAR(20),
-    nivel_acesso_id INTEGER NOT NULL REFERENCES niveis_acesso(id) DEFAULT 4,
-    ativo BOOLEAN DEFAULT TRUE,
-    foto_perfil VARCHAR(255),
-    ultimo_acesso TIMESTAMP WITH TIME ZONE,
-    token_reset_senha VARCHAR(255),
-    token_expiracao TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS permissoes_personalizadas (
-    usuario_id            INT PRIMARY KEY REFERENCES public.usuarios(id) ON DELETE CASCADE,
-    pode_operar_pdv       BOOLEAN NOT NULL DEFAULT FALSE,
-    pode_conferir_caixa   BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela: clientes
-CREATE TABLE IF NOT EXISTS clientes (
-    id SERIAL PRIMARY KEY,
-    uuid UUID DEFAULT uuid_generate_v4(),
-    nome VARCHAR(100) NOT NULL,
-    cpf_cnpj VARCHAR(20) NOT NULL UNIQUE,
-    email VARCHAR(100) NOT NULL UNIQUE,
-    telefone VARCHAR(20),
-    eh_cliente BOOLEAN NOT NULL DEFAULT TRUE,
-    eh_fornecedor BOOLEAN NOT NULL DEFAULT FALSE,
-    endereco TEXT,
-    cidade VARCHAR(100),
-    estado CHAR(2),
-    cep VARCHAR(10),
-    ativo BOOLEAN DEFAULT TRUE,
-    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela: notificacoes
-CREATE TABLE IF NOT EXISTS notificacoes (
-    id SERIAL PRIMARY KEY,
-    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
-    titulo VARCHAR(255) NOT NULL,
-    mensagem TEXT NOT NULL,
-    tipo VARCHAR(50),
-    link VARCHAR(255),
-    lida BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela: configuracoes
-CREATE TABLE IF NOT EXISTS configuracoes (
-    id SERIAL PRIMARY KEY,
-    chave VARCHAR(100) NOT NULL UNIQUE,
-    valor TEXT,
-    descricao TEXT,
-    tipo VARCHAR(50) DEFAULT 'text',
-    categoria VARCHAR(50) DEFAULT 'Geral',
-    ordem INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela: auditoria
-CREATE TABLE IF NOT EXISTS auditoria (
-    id SERIAL PRIMARY KEY,
-    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-    acao VARCHAR(100) NOT NULL,
-    tabela VARCHAR(100) NOT NULL,
-    registro_id INTEGER,
-    dados_antigos JSONB,
-    dados_novos JSONB,
-    ip_address VARCHAR(45),
-    user_agent TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
--- Tabela: formas_pagamento
-CREATE TABLE IF NOT EXISTS formas_pagamento (
-    id SERIAL PRIMARY KEY,
-    nome VARCHAR(100) NOT NULL UNIQUE,
-    tipo VARCHAR(3) NOT NULL,
-    descricao TEXT,
-    adquirente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
-    taxa NUMERIC(10,4) NOT NULL DEFAULT 0,
-    prazo_dias INTEGER NOT NULL DEFAULT 0,
-    conta_id INTEGER,
-    ativo BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_formas_pagamento_tipo CHECK (tipo IN ('D', 'PIX', 'TB', 'CC', 'CD', 'BOL', 'AF'))
-);
-
--- Tabela: contas
-CREATE TABLE IF NOT EXISTS contas (
-    id SERIAL PRIMARY KEY,
-    nome VARCHAR(100) NOT NULL,
-    tipo VARCHAR(20) NOT NULL,
-    banco VARCHAR(100),
-    agencia VARCHAR(20),
-    numero_conta VARCHAR(30),
-    saldo_inicial NUMERIC(15,4) DEFAULT 0,
-    saldo_atual NUMERIC(15,4) DEFAULT 0,
-    ativo BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_contas_tipo CHECK (tipo IN ('Banco', 'Caixa', 'Poupanca', 'Investimento'))
-);
-
--- Tabela: categorias_dre
-CREATE TABLE IF NOT EXISTS categorias_dre (
-    id SERIAL PRIMARY KEY,
-    nome VARCHAR(255) NOT NULL UNIQUE,
-    tipo VARCHAR(50) NOT NULL,
-    descricao TEXT,
-    ordem INTEGER DEFAULT 0,
-    ativo BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT categorias_dre_tipo_check CHECK (tipo IN ('Receita', 'Despesa', 'Deducao', 'CPV', 'Despesa Operacional', 'Despesa Financeira', 'Tributo', 'Outras'))
-);
-
--- Tabela: contas_receber
-CREATE TABLE IF NOT EXISTS contas_receber (
-    id SERIAL PRIMARY KEY,
-    descricao VARCHAR(255) NOT NULL,
-    cliente_id INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
-    forma_pagamento_id INTEGER REFERENCES formas_pagamento(id) ON DELETE SET NULL,
-    categoria_dre_id INTEGER REFERENCES categorias_dre(id) ON DELETE SET NULL,
-    valor NUMERIC(15,4) NOT NULL,
-    data_vencimento DATE NOT NULL,
-    data_pagamento DATE,
-    valor_pago NUMERIC(15,4),
-    desconto NUMERIC(15,4) DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'PENDENTE',
-    observacoes TEXT,
-    orcamento_id INTEGER,
-    pedido_id UUID,
-    origem VARCHAR(50),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_contas_receber_status CHECK (status IN ('PENDENTE', 'PAGO', 'VENCIDO', 'CANCELADO'))
-);
-
--- Tabela: contas_pagar
-CREATE TABLE IF NOT EXISTS contas_pagar (
-    id SERIAL PRIMARY KEY,
-    descricao VARCHAR(255) NOT NULL,
-    fornecedor VARCHAR(255),
-    categoria_dre_id INTEGER REFERENCES categorias_dre(id) ON DELETE SET NULL,
-    valor NUMERIC(15,4) NOT NULL,
-    data_vencimento DATE NOT NULL,
-    data_pagamento DATE,
-    valor_pago NUMERIC(15,4),
-    desconto NUMERIC(15,4) DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'PENDENTE',
-    observacoes TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_contas_pagar_status CHECK (status IN ('PENDENTE', 'PAGO', 'VENCIDO', 'CANCELADO'))
-);
-
--- Tabela: movimentacoes
-CREATE TABLE IF NOT EXISTS movimentacoes (
-    id SERIAL PRIMARY KEY,
-    conta_id INTEGER NOT NULL REFERENCES contas(id) ON DELETE CASCADE,
-    tipo VARCHAR(20) NOT NULL,
-    valor NUMERIC(15,4) NOT NULL,
-    data_movimentacao TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    descricao TEXT,
-    desconto NUMERIC(15,4) DEFAULT 0,
-    categoria_dre_id INTEGER REFERENCES categorias_dre(id) ON DELETE SET NULL,
-    forma_pagamento_id INTEGER REFERENCES formas_pagamento(id) ON DELETE SET NULL,
-    conta_receber_id INTEGER REFERENCES contas_receber(id) ON DELETE SET NULL,
-    conta_pagar_id INTEGER REFERENCES contas_pagar(id) ON DELETE SET NULL,
-    pedido_id UUID,
-    servico_id UUID,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_movimentacoes_tipo CHECK (tipo IN ('Entrada', 'SaÃ­da')),
-    CONSTRAINT chk_movimentacoes_valor CHECK (valor > 0)
-);
-
-
--- Tabela: produtos
-CREATE TABLE IF NOT EXISTS produtos (
-    id              SERIAL          PRIMARY KEY,
-    uuid            UUID            DEFAULT uuid_generate_v4() UNIQUE,
-    codigo          VARCHAR(50),
-    nome            VARCHAR(255)    NOT NULL,
-    descricao       TEXT,
-    unidade         VARCHAR(10)     NOT NULL DEFAULT 'UN',
-    preco_custo     NUMERIC(15,4)   NOT NULL DEFAULT 0,
-    preco_venda     NUMERIC(15,4)   NOT NULL DEFAULT 0,
-    estoque_atual   NUMERIC(15,4)   NOT NULL DEFAULT 0,
-    estoque_minimo  NUMERIC(15,4)   NOT NULL DEFAULT 0,
-    ativo           BOOLEAN         NOT NULL DEFAULT TRUE,
-    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_produtos_unidade     CHECK (unidade IN ('UN','KG','L','M','CX','PC','MT','M2','M3','PR')),
-    CONSTRAINT chk_produtos_preco_custo CHECK (preco_custo   >= 0),
-    CONSTRAINT chk_produtos_preco_venda CHECK (preco_venda   >= 0),
-    CONSTRAINT chk_produtos_estoque     CHECK (estoque_atual >= 0)
-);
-
-COMMENT ON TABLE produtos IS 'Catalogo de produtos. Dados fiscais em produto_fiscal (0..1).';
-
--- Tabela: produto_fiscal
-CREATE TABLE IF NOT EXISTS produto_fiscal (
-    id              SERIAL          PRIMARY KEY,
-    produto_id      INTEGER         NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
-    ncm             VARCHAR(8)      NOT NULL,
-    cest            VARCHAR(7),
-    cfop            VARCHAR(4)      NOT NULL,
-    origem          CHAR(1)         NOT NULL DEFAULT '0',
-    csosn_cst       VARCHAR(3),
-    aliquota_icms   NUMERIC(8,4)    NOT NULL DEFAULT 0
-                        CONSTRAINT chk_pf_aliq_icms    CHECK (aliquota_icms    BETWEEN 0 AND 100),
-    aliquota_ipi    NUMERIC(8,4)    NOT NULL DEFAULT 0
-                        CONSTRAINT chk_pf_aliq_ipi     CHECK (aliquota_ipi     BETWEEN 0 AND 100),
-    aliquota_pis    NUMERIC(8,4)    NOT NULL DEFAULT 0
-                        CONSTRAINT chk_pf_aliq_pis     CHECK (aliquota_pis     BETWEEN 0 AND 100),
-    aliquota_cofins NUMERIC(8,4)    NOT NULL DEFAULT 0
-                        CONSTRAINT chk_pf_aliq_cofins  CHECK (aliquota_cofins  BETWEEN 0 AND 100),
-    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_produto_fiscal_produto UNIQUE (produto_id),
-    CONSTRAINT chk_pf_ncm_len  CHECK (char_length(ncm)  = 8),
-    CONSTRAINT chk_pf_cest_len CHECK (cest IS NULL OR char_length(cest) = 7),
-    CONSTRAINT chk_pf_cfop_len CHECK (char_length(cfop) = 4),
-    CONSTRAINT chk_pf_origem   CHECK (origem IN ('0','1','2','3','4','5','6','7','8'))
-);
-
-COMMENT ON TABLE  produto_fiscal IS '1 produto para 0..1 registro fiscal. Separado para NF-e.';
-
-CREATE TABLE IF NOT EXISTS produto_estoque_movimentacoes (
-    id BIGSERIAL PRIMARY KEY,
-    produto_id INTEGER NOT NULL REFERENCES produtos(id) ON DELETE CASCADE,
-    usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-    tipo VARCHAR(20) NOT NULL,
-    origem VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
-    referencia_tipo VARCHAR(30),
-    referencia_id VARCHAR(64),
-    quantidade NUMERIC(15,4) NOT NULL,
-    estoque_anterior NUMERIC(15,4) NOT NULL,
-    estoque_posterior NUMERIC(15,4) NOT NULL,
-    observacao TEXT,
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_produto_estoque_mov_tipo CHECK (tipo IN ('ENTRADA', 'SAIDA')),
-    CONSTRAINT chk_produto_estoque_mov_qtd CHECK (quantidade > 0),
-    CONSTRAINT chk_produto_estoque_mov_saldo CHECK (estoque_anterior >= 0 AND estoque_posterior >= 0)
-);
-
--- Tabela: orcamentos
-CREATE TABLE IF NOT EXISTS orcamentos (
-    id                    SERIAL          PRIMARY KEY,
-    uuid                  UUID            DEFAULT uuid_generate_v4() UNIQUE,
-    numero                BIGSERIAL       UNIQUE,
-    cliente_id            INTEGER         REFERENCES clientes(id) ON DELETE SET NULL,
-    usuario_id            INTEGER         REFERENCES usuarios(id) ON DELETE SET NULL,
-    data_orcamento        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    validade_dias         INTEGER         NOT NULL DEFAULT 30
-                             CONSTRAINT chk_orcamentos_validade CHECK (validade_dias > 0),
-    data_validade         DATE,
-    status                VARCHAR(20)     NOT NULL DEFAULT 'RASCUNHO'
-                             CONSTRAINT chk_orcamentos_status
-                             CHECK (status IN ('RASCUNHO', 'ENVIADO', 'APROVADO', 'REJEITADO', 'EXPIRADO', 'CANCELADO')),
-    desconto_percentual   NUMERIC(5,2)    NOT NULL DEFAULT 0
-                             CONSTRAINT chk_orcamentos_desconto_percentual CHECK (desconto_percentual >= 0 AND desconto_percentual <= 100),
-    valor_total           NUMERIC(15,4)   NOT NULL DEFAULT 0
-                             CONSTRAINT chk_orcamentos_valor_total CHECK (valor_total >= 0),
-    observacoes           TEXT,
-    forma_pagamento_texto TEXT,
-    condicoes_gerais      TEXT,
-    data_aprovacao        TIMESTAMP WITH TIME ZONE,
-    aprovado_por_nome     VARCHAR(255),
-    aprovado_por_cpf      VARCHAR(20),
-    share_token           VARCHAR(64)     UNIQUE,
-    share_expires_at      TIMESTAMP WITH TIME ZONE,
-    ativo                 BOOLEAN         NOT NULL DEFAULT TRUE,
-    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE orcamentos IS 'Cabecalho dos orcamentos. Status controlado via triggers e validacoes.';
-COMMENT ON COLUMN orcamentos.share_token IS 'Token para compartilhamento publico sem autenticacao.';
-
--- Tabela: orcamento_itens
-CREATE TABLE IF NOT EXISTS orcamento_itens (
-    id                  SERIAL          PRIMARY KEY,
-    orcamento_id        INTEGER         NOT NULL REFERENCES orcamentos(id) ON DELETE CASCADE,
-    produto_id          INTEGER         REFERENCES produtos(id) ON DELETE SET NULL,
-    nome_produto        VARCHAR(255)    NOT NULL,
-    descricao_item      TEXT,
-    quantidade          NUMERIC(15,4)   NOT NULL
-                           CONSTRAINT chk_orcamento_itens_quantidade CHECK (quantidade > 0),
-    valor_unitario      NUMERIC(15,4)   NOT NULL
-                           CONSTRAINT chk_orcamento_itens_valor_unitario CHECK (valor_unitario >= 0),
-    valor_total_item    NUMERIC(15,4)   NOT NULL
-                           CONSTRAINT chk_orcamento_itens_valor_total_item CHECK (valor_total_item >= 0),
-    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE orcamento_itens IS 'Itens de cada orcamento. Ciclo de vida acoplado ao cabecalho.';
-
-ALTER TABLE orcamento_itens
-    ADD COLUMN IF NOT EXISTS tipo_item VARCHAR(20) NOT NULL DEFAULT 'PRODUTO';
-
-ALTER TABLE orcamento_itens
-    ADD COLUMN IF NOT EXISTS servico_id INTEGER;
-
-ALTER TABLE orcamento_itens
-    ADD COLUMN IF NOT EXISTS nome_servico VARCHAR(255);
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.table_constraints
-        WHERE table_schema = 'public'
-          AND table_name = 'orcamento_itens'
-          AND constraint_name = 'chk_orcamento_itens_tipo_item'
-    ) THEN
-        ALTER TABLE orcamento_itens
-            ADD CONSTRAINT chk_orcamento_itens_tipo_item
-            CHECK (tipo_item IN ('PRODUTO', 'SERVICO'));
-    END IF;
-END $$;
-
--- Tabela: pedidos
-CREATE TABLE IF NOT EXISTS pedidos (
-    id                    UUID            PRIMARY KEY DEFAULT uuid_generate_v4(),
-    numero                BIGSERIAL       UNIQUE NOT NULL,
-    cliente_id            INTEGER         REFERENCES clientes(id) ON DELETE SET NULL,
-    usuario_id            INTEGER         REFERENCES usuarios(id) ON DELETE SET NULL,
-    orcamento_id          INTEGER         REFERENCES orcamentos(id) ON DELETE SET NULL,
-    data_pedido           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status                VARCHAR(20)     NOT NULL DEFAULT 'PENDENTE'
-                             CONSTRAINT chk_pedidos_status
-                             CHECK (status IN (
-                                 'RASCUNHO',
-                                 'PENDENTE',
-                                 'EM_PROCESSO',  -- Status para Kanban
-                                 'APROVADO',
-                                 'FATURADO',
-                                 'CANCELADO',
-                                 'CONCLUIDO'
-                             )),
-    valor_total           NUMERIC(15,4)   NOT NULL DEFAULT 0
-                             CONSTRAINT chk_pedidos_valor_total CHECK (valor_total >= 0),
-    desconto_tipo         VARCHAR(20)
-                             CONSTRAINT chk_pedidos_desconto_tipo
-                             CHECK (desconto_tipo IS NULL OR desconto_tipo IN ('VALOR', 'PERCENTUAL')),
-    desconto_valor        NUMERIC(15,2)   NOT NULL DEFAULT 0
-                             CONSTRAINT chk_pedidos_desconto_valor CHECK (desconto_valor >= 0),
-    observacoes           TEXT,
-    data_faturamento      TIMESTAMP WITH TIME ZONE,
-    data_entrega_prevista DATE,
-    data_entrega_realizada DATE,
-    ativo                 BOOLEAN         NOT NULL DEFAULT TRUE,
-    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE pedidos IS 'Cabecalho dos pedidos de venda do modulo Gestao de Pedidos.';
-COMMENT ON COLUMN pedidos.status IS 
-'Ciclo de vida: RASCUNHO, PENDENTE, EM_PROCESSO, APROVADO, FATURADO, CANCELADO, CONCLUIDO.
-Kanban visual usa 4 colunas: PENDENTE (agrupa RASCUNHO+PENDENTE), EM_PROCESSO (agrupa EM_PROCESSO+APROVADO), 
-CONCLUIDO, FATURADO (read-only). Transicoes via drag-drop validadas em PedidoService::atualizarStatusKanban().';
-COMMENT ON COLUMN pedidos.ativo IS 'Soft delete logico do pedido.';
-
--- Tabela: pedido_itens
-CREATE TABLE IF NOT EXISTS pedido_itens (
-    id                  UUID            PRIMARY KEY DEFAULT uuid_generate_v4(),
-    pedido_id           UUID            NOT NULL REFERENCES pedidos(id) ON DELETE CASCADE,
-    produto_id          INTEGER         REFERENCES produtos(id) ON DELETE SET NULL,
-    nome_produto        VARCHAR(255)    NOT NULL,
-    quantidade          NUMERIC(15,4)   NOT NULL
-                           CONSTRAINT chk_pedido_itens_quantidade CHECK (quantidade > 0),
-    valor_unitario      NUMERIC(15,4)   NOT NULL
-                           CONSTRAINT chk_pedido_itens_valor_unitario CHECK (valor_unitario >= 0),
-    valor_total_item    NUMERIC(15,4)   NOT NULL
-                           CONSTRAINT chk_pedido_itens_valor_total_item CHECK (valor_total_item >= 0),
-    observacoes         TEXT,
-    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE pedido_itens IS 'Itens de cada pedido. Ciclo de vida acoplado ao cabecalho de pedidos.';
-COMMENT ON COLUMN pedido_itens.nome_produto IS 'Snapshot do nome do produto no momento do pedido.';
-
-CREATE TABLE IF NOT EXISTS servicos_catalogo (
-    id                  SERIAL PRIMARY KEY,
-    nome                VARCHAR(255) NOT NULL UNIQUE,
-    descricao           TEXT,
-    valor_base          NUMERIC(15,4) NOT NULL DEFAULT 0
-                           CONSTRAINT chk_servicos_catalogo_valor_base CHECK (valor_base >= 0),
-    ativo               BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE servicos_catalogo IS 'Cadastro mestre dos servicos oferecidos pela empresa.';
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM information_schema.table_constraints
-        WHERE table_schema = 'public'
-          AND table_name = 'orcamento_itens'
-          AND constraint_name = 'fk_orcamento_itens_servico'
-    ) THEN
-        ALTER TABLE orcamento_itens
-            ADD CONSTRAINT fk_orcamento_itens_servico
-            FOREIGN KEY (servico_id) REFERENCES servicos_catalogo(id) ON DELETE SET NULL;
-    END IF;
-END $$;
-
-CREATE TABLE IF NOT EXISTS servicos (
-    id                     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    numero                 BIGSERIAL UNIQUE NOT NULL,
-    cliente_id             INTEGER REFERENCES clientes(id) ON DELETE SET NULL,
-    usuario_id             INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
-    orcamento_id           INTEGER REFERENCES orcamentos(id) ON DELETE SET NULL,
-    servico_catalogo_id    INTEGER REFERENCES servicos_catalogo(id) ON DELETE SET NULL,
-    produto_id             INTEGER REFERENCES produtos(id) ON DELETE SET NULL,
-    data_servico           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status                 VARCHAR(20) NOT NULL DEFAULT 'PENDENTE'
-                              CONSTRAINT chk_servicos_status
-                              CHECK (status IN ('PENDENTE', 'EM_PROCESSO', 'CONCLUIDO', 'FATURADO', 'CANCELADO')),
-    nome_cliente           VARCHAR(255) NOT NULL,
-    telefone_cliente       VARCHAR(20),
-    servico_nome           VARCHAR(255) NOT NULL,
-    produto_nome           VARCHAR(255),
-    produto_quantidade     NUMERIC(15,4) NOT NULL DEFAULT 0
-                              CONSTRAINT chk_servicos_produto_quantidade CHECK (produto_quantidade >= 0),
-    servico_valor          NUMERIC(15,4) NOT NULL DEFAULT 0
-                              CONSTRAINT chk_servicos_servico_valor CHECK (servico_valor >= 0),
-    produto_valor_unitario NUMERIC(15,4) NOT NULL DEFAULT 0
-                              CONSTRAINT chk_servicos_produto_valor_unitario CHECK (produto_valor_unitario >= 0),
-    placa                  VARCHAR(10),
-    modelo_veiculo         VARCHAR(120),
-    desconto_tipo          VARCHAR(20)
-                              CONSTRAINT chk_servicos_desconto_tipo
-                              CHECK (desconto_tipo IS NULL OR desconto_tipo IN ('VALOR', 'PERCENTUAL')),
-    desconto_valor         NUMERIC(15,2) NOT NULL DEFAULT 0
-                              CONSTRAINT chk_servicos_desconto_valor CHECK (desconto_valor >= 0),
-    valor_total            NUMERIC(15,4) NOT NULL DEFAULT 0
-                              CONSTRAINT chk_servicos_valor_total CHECK (valor_total >= 0),
-    observacoes            TEXT,
-    data_faturamento       TIMESTAMP WITH TIME ZONE,
-    ativo                  BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at             TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at             TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE servicos IS 'Execucao e fluxo operacional dos servicos realizados para clientes.';
-COMMENT ON COLUMN servicos.servico_nome IS 'Snapshot do servico principal ou resumo dos servicos do orcamento.';
-COMMENT ON COLUMN servicos.produto_nome IS 'Snapshot do produto relacionado ao servico, quando houver.';
-COMMENT ON COLUMN servicos.produto_quantidade IS 'Quantidade do produto vinculado ao servico, quando houver.';
-COMMENT ON COLUMN servicos.servico_valor IS 'Valor da mao de obra ou do servico principal antes de descontos.';
-COMMENT ON COLUMN servicos.produto_valor_unitario IS 'Valor unitario do produto consumido no servico.';
-COMMENT ON COLUMN servicos.desconto_tipo IS 'Tipo de desconto aplicado ao servico: VALOR ou PERCENTUAL.';
-COMMENT ON COLUMN servicos.desconto_valor IS 'Valor nominal ou percentual do desconto aplicado ao servico.';
-
-CREATE TABLE IF NOT EXISTS servico_itens (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    servico_id          UUID NOT NULL REFERENCES servicos(id) ON DELETE CASCADE,
-    produto_id          INTEGER REFERENCES produtos(id) ON DELETE SET NULL,
-    nome_produto        VARCHAR(255) NOT NULL,
-    quantidade          NUMERIC(15,4) NOT NULL DEFAULT 0
-                           CONSTRAINT chk_servico_itens_quantidade CHECK (quantidade > 0),
-    valor_unitario      NUMERIC(15,4) NOT NULL DEFAULT 0
-                           CONSTRAINT chk_servico_itens_valor_unitario CHECK (valor_unitario >= 0),
-    valor_total_item    NUMERIC(15,4) NOT NULL DEFAULT 0
-                           CONSTRAINT chk_servico_itens_valor_total_item CHECK (valor_total_item >= 0),
-    observacoes         TEXT,
-    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE servico_itens IS 'Itens de produto consumidos em cada servico.';
-COMMENT ON COLUMN servico_itens.nome_produto IS 'Snapshot do nome do produto no momento do servico.';
-
-CREATE TABLE IF NOT EXISTS pdv_caixas (
-    id                    SERIAL PRIMARY KEY,
-    usuario_abertura_id   INTEGER NOT NULL REFERENCES usuarios(id),
-    numero_caixa          INTEGER NOT NULL,
-    status                VARCHAR(20) NOT NULL DEFAULT 'aberto'
-                              CHECK (status IN ('aberto', 'fechado')),
-    valor_suprimento      NUMERIC(12,2) NOT NULL DEFAULT 0,
-    data_abertura         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    data_fechamento       TIMESTAMP WITH TIME ZONE,
-    fechamento_dinheiro   NUMERIC(12,2),
-    fechamento_cartao     NUMERIC(12,2),
-    fechamento_pix        NUMERIC(12,2),
-    fechamento_faturar    NUMERIC(12,2),
-    sistema_dinheiro      NUMERIC(12,2),
-    sistema_cartao        NUMERIC(12,2),
-    sistema_pix           NUMERIC(12,2),
-    sistema_faturar       NUMERIC(12,2),
-    diferenca_dinheiro    NUMERIC(12,2),
-    diferenca_cartao      NUMERIC(12,2),
-    diferenca_pix         NUMERIC(12,2),
-    diferenca_faturar     NUMERIC(12,2),
-    diferenca_total       NUMERIC(12,2),
-    observacao            TEXT,
-    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE pdv_caixas IS 'Sessao de caixa do PDV com abertura, fechamento cego e conferencia.';
-
-CREATE TABLE IF NOT EXISTS pdv_lancamentos (
-    id                    SERIAL PRIMARY KEY,
-    caixa_id              INTEGER NOT NULL REFERENCES pdv_caixas(id) ON DELETE CASCADE,
-    usuario_id            INTEGER NOT NULL REFERENCES usuarios(id),
-    tipo                  VARCHAR(20) NOT NULL CHECK (tipo IN ('pedido', 'servico')),
-    referencia_id         UUID NOT NULL,
-    valor_total           NUMERIC(12,2) NOT NULL CHECK (valor_total >= 0),
-    forma_pagamento       VARCHAR(20) NOT NULL
-                              CHECK (forma_pagamento IN ('dinheiro', 'cartao', 'pix', 'a_faturar')),
-    created_at            TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE pdv_lancamentos IS 'Lancamentos de pedidos e servicos vinculados a um caixa do PDV.';
-COMMENT ON COLUMN pdv_lancamentos.referencia_id IS 'UUID do pedido ou servico lancado no caixa.';
-
-ALTER TABLE servicos
-    ADD COLUMN IF NOT EXISTS servico_valor NUMERIC(15,4) NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS produto_valor_unitario NUMERIC(15,4) NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS desconto_tipo VARCHAR(20),
-    ADD COLUMN IF NOT EXISTS desconto_valor NUMERIC(15,2) NOT NULL DEFAULT 0;
-
--- ============================================================================
--- INTEGRACAO FINANCEIRA (FKs adicionais)
--- ============================================================================
-
--- Integracao orcamento x contas_receber
-ALTER TABLE contas_receber
-    ADD COLUMN IF NOT EXISTS orcamento_id INTEGER REFERENCES orcamentos(id) ON DELETE SET NULL;
-
-COMMENT ON COLUMN contas_receber.origem IS 'Origem do lancamento: ORCAMENTO, PEDIDO, MANUAL, etc.';
-COMMENT ON COLUMN contas_receber.orcamento_id IS 'FK para orcamentos quando origem = ORCAMENTO.';
-
--- Integracao pedido x contas_receber
-ALTER TABLE contas_receber
-    ADD COLUMN IF NOT EXISTS pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL;
-
-COMMENT ON COLUMN contas_receber.pedido_id IS 'FK para pedidos quando origem = PEDIDO.';
-
--- Integracao servico x contas_receber
-ALTER TABLE contas_receber
-    ADD COLUMN IF NOT EXISTS servico_id UUID REFERENCES servicos(id) ON DELETE SET NULL;
-
-COMMENT ON COLUMN contas_receber.servico_id IS 'FK para servicos quando origem = SERVICO.';
-
-ALTER TABLE formas_pagamento
-    ADD COLUMN IF NOT EXISTS conta_id INTEGER;
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'formas_pagamento_conta_id_fkey'
-    ) THEN
-        ALTER TABLE formas_pagamento
-            ADD CONSTRAINT formas_pagamento_conta_id_fkey
-            FOREIGN KEY (conta_id) REFERENCES contas(id) ON DELETE SET NULL;
-    END IF;
-END $$;
-
-ALTER TABLE movimentacoes
-    ADD COLUMN IF NOT EXISTS pedido_id UUID REFERENCES pedidos(id) ON DELETE SET NULL;
-
-ALTER TABLE movimentacoes
-    ADD COLUMN IF NOT EXISTS servico_id UUID REFERENCES servicos(id) ON DELETE SET NULL;
-
-CREATE INDEX IF NOT EXISTS idx_permissoes_personalizadas_operar
-    ON permissoes_personalizadas(pode_operar_pdv);
-
-CREATE INDEX IF NOT EXISTS idx_permissoes_personalizadas_conferir
-    ON permissoes_personalizadas(pode_conferir_caixa);
-
-CREATE INDEX IF NOT EXISTS idx_pdv_caixas_status
-    ON pdv_caixas(status);
-
-CREATE INDEX IF NOT EXISTS idx_pdv_caixas_usuario
-    ON pdv_caixas(usuario_abertura_id);
-
-CREATE INDEX IF NOT EXISTS idx_pdv_caixas_data
-    ON pdv_caixas(data_abertura);
-
-CREATE INDEX IF NOT EXISTS idx_pdv_lancamentos_caixa
-    ON pdv_lancamentos(caixa_id);
-
-CREATE INDEX IF NOT EXISTS idx_pdv_lancamentos_ref
-    ON pdv_lancamentos(tipo, referencia_id);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_pdv_lancamentos_referencia
-    ON pdv_lancamentos(tipo, referencia_id);
-
--- ============================================================================
--- INSERCAO DE DADOS INICIAIS (SEGURO)
--- ============================================================================
-
--- Inserir niveis de acesso iniciais
-INSERT INTO niveis_acesso (nome, descricao) 
-SELECT 'Administrador', 'Acesso total ao sistema'
-WHERE NOT EXISTS (SELECT 1 FROM niveis_acesso WHERE nome = 'Administrador');
-
-INSERT INTO niveis_acesso (nome, descricao) 
-SELECT 'Suporte', 'Acesso as funcionalidades de suporte'
-WHERE NOT EXISTS (SELECT 1 FROM niveis_acesso WHERE nome = 'Suporte');
-
-INSERT INTO niveis_acesso (nome, descricao) 
-SELECT 'Financeiro', 'Acesso ao modulo financeiro'
-WHERE NOT EXISTS (SELECT 1 FROM niveis_acesso WHERE nome = 'Financeiro');
-
-INSERT INTO niveis_acesso (nome, descricao) 
-SELECT 'Cliente', 'Acesso restrito ao proprio perfil e chamados'
-WHERE NOT EXISTS (SELECT 1 FROM niveis_acesso WHERE nome = 'Cliente');
-
--- Inserir usuario administrador padrao (senha: admin123)
-INSERT INTO usuarios (nome, email, senha, nivel_acesso_id) 
-SELECT 'Administrador', 'admin@suporte.com', '$2y$10$wB0zrwdGRYvik1hTLMMVcuimbgaJpT7g.3CPBm8MmAL/LIvsdriOy', 1
-WHERE NOT EXISTS (SELECT 1 FROM usuarios WHERE email = 'admin@suporte.com');
-
--- Inserir configuracoes iniciais
-INSERT INTO configuracoes (chave, valor, descricao, tipo, categoria, ordem) VALUES 
-('nome_sistema', 'Sistema de Chamados', 'Nome do sistema exibido no cabecalho', 'text', 'Geral', 1),
-('logo_sistema', 'logo.png', 'Logo do sistema', 'image', 'Aparencia', 2),
-('cor_primaria', '#4361ee', 'Cor primaria do sistema', 'color', 'Aparencia', 3),
-('itens_por_pagina', '10', 'Numero de itens por pagina nas listagens', 'number', 'Sistema', 4),
-('manutencao', 'false', 'Ativar modo manutencao', 'boolean', 'Sistema', 5),
-('email_notificacao', 'suporte@empresa.com', 'E-mail para notificacoes', 'email', 'E-mail', 6),
-('smtp_host', 'smtp.empresa.com', 'Servidor SMTP', 'text', 'E-mail', 7),
-('smtp_porta', '587', 'Porta SMTP', 'number', 'E-mail', 8),
-('smtp_usuario', 'usuario@empresa.com', 'Usuario SMTP', 'text', 'E-mail', 9),
-('smtp_senha', '', 'Senha SMTP', 'password', 'E-mail', 10),
-('endereco_empresa', 'Rua Exemplo, 123', 'Endereco da empresa', 'text', 'Empresa', 11),
-('telefone_contato', '(11) 1234-5678', 'Telefone para contato', 'text', 'Empresa', 12)
-ON CONFLICT (chave) DO NOTHING;
-
--- Inserir formas de pagamento iniciais
-INSERT INTO formas_pagamento (nome, tipo, descricao) VALUES 
-('Dinheiro', 'D', 'Pagamento em dinheiro'),
-('CartÃ£o de DÃ©bito', 'CD', 'CartÃ£o de DÃ©bito'),
-('CartÃ£o de CrÃ©dito', 'CC', 'CartÃ£o de CrÃ©dito'),
-('PIX', 'PIX', 'TransferÃªncia via PIX'),
-('Boleto', 'BOL', 'Boleto bancario'),
-('TransferÃªncia BancÃ¡ria', 'TB', 'TransferÃªncia BancÃ¡ria'),
-('Fatura', 'AF', 'Fatura')
-ON CONFLICT (nome) DO NOTHING;
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM formas_pagamento WHERE nome = 'CartÃ£o de DÃ©bito')
-       AND EXISTS (SELECT 1 FROM formas_pagamento WHERE tipo = 'CD' AND nome <> 'CartÃ£o de DÃ©bito') THEN
-        DELETE FROM formas_pagamento
-        WHERE tipo = 'CD'
-          AND nome <> 'CartÃ£o de DÃ©bito';
-    END IF;
-
-    UPDATE formas_pagamento
-    SET nome = 'CartÃ£o de DÃ©bito',
-        tipo = 'CD',
-        descricao = 'CartÃ£o de DÃ©bito'
-    WHERE tipo = 'CD'
-       OR nome IN ('CartÃ£o de DÃ©bito', 'CartÃ£o de DÃ©bito');
-END $$;
-
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM formas_pagamento WHERE nome = 'CartÃ£o de CrÃ©dito')
-       AND EXISTS (SELECT 1 FROM formas_pagamento WHERE tipo = 'CC' AND nome <> 'CartÃ£o de CrÃ©dito') THEN
-        DELETE FROM formas_pagamento
-        WHERE tipo = 'CC'
-          AND nome <> 'CartÃ£o de CrÃ©dito';
-    END IF;
-
-    UPDATE formas_pagamento
-    SET nome = 'CartÃ£o de CrÃ©dito',
-        tipo = 'CC',
-        descricao = 'CartÃ£o de CrÃ©dito'
-    WHERE tipo = 'CC'
-       OR nome IN ('CartÃ£o de CrÃ©dito', 'CartÃ£o de CrÃ©dito');
-END $$;
-
-DO $$
-BEGIN
-    UPDATE formas_pagamento
-    SET tipo = 'PIX',
-        descricao = 'TransferÃªncia via PIX'
-    WHERE nome = 'PIX';
-
-    UPDATE formas_pagamento
-    SET nome = 'Boleto',
-        tipo = 'BOL',
-        descricao = 'Boleto bancario'
-    WHERE tipo = 'BOL'
-       OR nome = 'Boleto';
-
-    DELETE FROM formas_pagamento
-    WHERE id IN (
-        SELECT id
-        FROM (
-            SELECT
-                id,
-                ROW_NUMBER() OVER (
-                    ORDER BY
-                        CASE WHEN nome = 'TransferÃªncia BancÃ¡ria' THEN 0 ELSE 1 END,
-                        id
-                ) AS rn
-            FROM formas_pagamento
-            WHERE tipo = 'TB'
-               OR nome IN ('TransferÃªncia BancÃ¡ria', 'TransferÃªncia BancÃ¡ria', 'TransferÃªncia BancÃ¡ria')
-        ) t
-        WHERE t.rn > 1
-    );
-
-    UPDATE formas_pagamento
-    SET nome = 'TransferÃªncia BancÃ¡ria',
-        tipo = 'TB',
-        descricao = 'Transferencia bancaria'
-    WHERE tipo = 'TB'
-       OR nome IN ('TransferÃªncia BancÃ¡ria', 'TransferÃªncia BancÃ¡ria', 'TransferÃªncia BancÃ¡ria');
-
-    IF EXISTS (SELECT 1 FROM formas_pagamento WHERE nome = 'A faturar')
-       AND EXISTS (
-            SELECT 1 FROM formas_pagamento
-            WHERE tipo IN ('AF', 'F')
-              AND nome <> 'A faturar'
-       ) THEN
-        DELETE FROM formas_pagamento
-        WHERE tipo IN ('AF', 'F')
-          AND nome <> 'A faturar';
-    END IF;
-
-    UPDATE formas_pagamento
-    SET nome = 'A faturar',
-        tipo = 'AF',
-        descricao = 'Pagamento a prazo'
-    WHERE tipo IN ('AF', 'F')
-       OR nome IN ('Fatura', 'A faturar');
-END $$;
-
--- Inserir categorias DRE completas (UMA UNICA VEZ)
-INSERT INTO categorias_dre (nome, tipo, descricao, ordem) VALUES 
--- 1. RECEITA BRUTA
-('Vendas de Produtos', 'Receita', 'Receita bruta com vendas de produtos', 1),
-('Vendas de Servicos', 'Receita', 'Receita bruta com prestacao de servicos', 2),
-('Receitas Financeiras', 'Receita', 'Juros e rendimentos financeiros', 3),
-('Outras Receitas Operacionais', 'Receita', 'Outras receitas brutas operacionais', 4),
-
--- 2. DEDUCOES DA RECEITA BRUTA
-('ICMS sobre Vendas', 'Deducao', 'Imposto ICMS incidente sobre vendas', 10),
-('IPI sobre Vendas', 'Deducao', 'Imposto IPI incidente sobre vendas', 11),
-('PIS sobre Vendas', 'Deducao', 'PIS incidente sobre faturamento', 12),
-('COFINS sobre Vendas', 'Deducao', 'COFINS incidente sobre faturamento', 13),
-('ISS sobre Servicos', 'Deducao', 'ISS incidente sobre prestacao de servicos', 14),
-('Devolucoes de Vendas', 'Deducao', 'Devolucoes de produtos vendidos', 15),
-('Abatimentos Comerciais', 'Deducao', 'Abatimentos e descontos comerciais', 16),
-('Descontos obtidos', 'Deducao', 'Descontos obtidos', 17),
-
--- 3. CPV/CMV - CUSTO DOS PRODUTOS/MERCADORIAS VENDIDAS
-('Custo de Mercadorias Vendidas - CMV', 'CPV', 'Custo das mercadorias vendidas no periodo', 20),
-('Custo de Produtos Vendidos - CPV', 'CPV', 'Custo dos produtos fabricados e vendidos', 21),
-('Materia-Prima', 'CPV', 'Custo com materia-prima para producao', 22),
-('Embalagens', 'CPV', 'Custo com embalagens para produtos', 23),
-('Frete de Compras', 'CPV', 'Frete e transporte de compras', 24),
-('Compras de Mercadoria', 'CPV', 'Compras de mercadoria para revenda', 25),
-
--- 4. DESPESAS OPERACIONAIS - Vendas
-('Salarios - Vendedores', 'Despesa Operacional', 'Salarios e comissoes da equipe de vendas', 30),
-('Marketing e Publicidade', 'Despesa Operacional', 'Despesas com marketing e publicidade', 31),
-('Propaganda e Promocao', 'Despesa Operacional', 'Despesas com propaganda e promocoes', 32),
-('Comissoes sobre Vendas', 'Despesa Operacional', 'Comissoes pagas sobre vendas', 33),
-
--- 4. DESPESAS OPERACIONAIS - Administrativas
-('Salarios - Administracao', 'Despesa Operacional', 'Salarios da equipe administrativa', 40),
-('Aluguel de Imoveis', 'Despesa Operacional', 'Aluguel de imoveis comerciais e industriais', 41),
-('Agua e Esgoto', 'Despesa Operacional', 'Despesas com Agua e esgoto', 42),
-('Energia Eletrica', 'Despesa Operacional', 'Despesas com energia eletrica', 43),
-('Telefone e Internet', 'Despesa Operacional', 'Despesas com telefonia e internet', 44),
-('Material de Escritorio', 'Despesa Operacional', 'Material de escritorio e suprimentos', 45),
-('Servicos de Terceiros', 'Despesa Operacional', 'Servicos contratados de terceiros', 46),
-('Honorarios Contabeis', 'Despesa Operacional', 'Honorarios de contador e advocacia', 47),
-('Seguros', 'Despesa Operacional', 'Premios de seguros diversos', 48),
-('Depreciacao de Ativos', 'Despesa Operacional', 'Depreciacao de moveis e utensilios', 49),
-('Despesas de Viagem (Hotel)', 'Despesa Operacional', 'Despesas com hospedagem em viagens', 26),
-('Despesas de Viagem (Cafe da Manha)', 'Despesa Operacional', 'Despesas com cafe da manha em viagens', 27),
-('Despesas de Viagem (Abastecimentos)', 'Despesa Operacional', 'Despesas com abastecimento de veiculos em viagens', 28),
-('Uso e Consumo', 'Despesa Operacional', 'Despesas com uso e consumo de materiais', 29),
-
--- 4. DESPESAS OPERACIONAIS - Financeiras
-('Juros Passivos', 'Despesa Financeira', 'Juros pagos sobre emprastimos e financiamentos', 50),
-('Taxas BancÃ¡rias', 'Despesa Financeira', 'Taxas e tarifas BancÃ¡rias', 51),
-('Variacoes Cambiais', 'Despesa Financeira', 'Perdas com variacao cambial', 52),
-('Descontos Cedidos em Vendas', 'Despesa Operacional', 'Descontos concedidos em operacoes de venda', 37),
-
--- 5. TRIBUTOS SOBRE O LUCRO
-('Imposto de Renda - PJ', 'Tributo', 'Imposto de Renda Pessoa Juridica', 60),
-('Contribuicao Social - CSLL', 'Tributo', 'Contribuicao Social sobre Lucro Liquido', 61),
-
--- 6. OUTRAS CATEGORIAS
-('Provisoes', 'Outras', 'Provisoes diversas', 70),
-('Resultados Nao Operacionais', 'Outras', 'Resultados de transacoes nao operacionais', 71)
-ON CONFLICT (nome) DO NOTHING;
-
--- ============================================================================
--- INDICES PARA MELHORAR DESEMPENHO
--- ============================================================================
-
--- --------------------------------------
--- Indices: usuarios
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
-CREATE INDEX IF NOT EXISTS idx_usuarios_nivel_acesso ON usuarios(nivel_acesso_id);
-CREATE INDEX IF NOT EXISTS idx_usuarios_ativo ON usuarios(ativo);
-
--- --------------------------------------
--- Indices: clientes (com otimizacao GIN para busca textual)
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_clientes_email ON clientes(email);
-CREATE INDEX IF NOT EXISTS idx_clientes_cpf_cnpj ON clientes(cpf_cnpj);
-CREATE INDEX IF NOT EXISTS idx_clientes_usuario ON clientes(usuario_id);
-CREATE INDEX IF NOT EXISTS idx_clientes_ativo ON clientes(ativo);
-
--- OTIMIZACAO: Indice GIN para busca textual rapida com ILIKE
-CREATE INDEX IF NOT EXISTS idx_clientes_nome_trgm ON clientes USING gin(nome gin_trgm_ops);
-
-COMMENT ON INDEX idx_clientes_nome_trgm IS 
-'Indice GIN para busca ILIKE otimizada. Performance: 400ms para 40ms para 10.000 registros';
-
--- --------------------------------------
--- Indices: notificacoes
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_notificacoes_usuario ON notificacoes(usuario_id);
-CREATE INDEX IF NOT EXISTS idx_notificacoes_lida ON notificacoes(lida);
-
--- --------------------------------------
--- Indices: auditoria
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria(usuario_id);
-CREATE INDEX IF NOT EXISTS idx_auditoria_tabela ON auditoria(tabela);
-CREATE INDEX IF NOT EXISTS idx_auditoria_created_at ON auditoria(created_at DESC);
-
--- --------------------------------------
--- Indices: formas_pagamento
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_formas_pagamento_ativo ON formas_pagamento(ativo);
-CREATE INDEX IF NOT EXISTS idx_formas_pagamento_adquirente ON formas_pagamento(adquirente_id);
-CREATE INDEX IF NOT EXISTS idx_formas_pagamento_conta ON formas_pagamento(conta_id);
-
--- --------------------------------------
--- Indices: contas
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_contas_ativo ON contas(ativo);
-CREATE INDEX IF NOT EXISTS idx_contas_tipo ON contas(tipo);
-
--- --------------------------------------
--- Indices: categorias_dre
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_categorias_dre_tipo ON categorias_dre(tipo);
-CREATE INDEX IF NOT EXISTS idx_categorias_dre_ativo ON categorias_dre(ativo);
-
--- --------------------------------------
--- Indices: contas_receber
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_contas_receber_cliente ON contas_receber(cliente_id);
-CREATE INDEX IF NOT EXISTS idx_contas_receber_status ON contas_receber(status);
-CREATE INDEX IF NOT EXISTS idx_contas_receber_vencimento ON contas_receber(data_vencimento);
-CREATE INDEX IF NOT EXISTS idx_contas_receber_categoria ON contas_receber(categoria_dre_id);
-CREATE INDEX IF NOT EXISTS idx_contas_receber_forma_pagamento ON contas_receber(forma_pagamento_id)
-    WHERE forma_pagamento_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_contas_receber_orcamento ON contas_receber(orcamento_id)
-    WHERE orcamento_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_contas_receber_pedido_id ON contas_receber(pedido_id)
-    WHERE pedido_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_contas_receber_origem ON contas_receber(origem)
-    WHERE origem IS NOT NULL;
-
--- --------------------------------------
--- Indices: contas_pagar
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_contas_pagar_status ON contas_pagar(status);
-CREATE INDEX IF NOT EXISTS idx_contas_pagar_vencimento ON contas_pagar(data_vencimento);
-CREATE INDEX IF NOT EXISTS idx_contas_pagar_categoria ON contas_pagar(categoria_dre_id);
-
--- --------------------------------------
--- Indices: movimentacoes
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_movimentacoes_conta ON movimentacoes(conta_id);
-CREATE INDEX IF NOT EXISTS idx_movimentacoes_pedido ON movimentacoes(pedido_id)
-    WHERE pedido_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_movimentacoes_servico ON movimentacoes(servico_id)
-    WHERE servico_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_movimentacoes_tipo ON movimentacoes(tipo);
-CREATE INDEX IF NOT EXISTS idx_movimentacoes_data ON movimentacoes(data_movimentacao DESC);
-CREATE INDEX IF NOT EXISTS idx_movimentacoes_categoria ON movimentacoes(categoria_dre_id);
-
-
--- --------------------------------------
--- Indices: produtos
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_produtos_codigo ON produtos(codigo);
-CREATE INDEX IF NOT EXISTS idx_produtos_ativo ON produtos(ativo);
-
--- --------------------------------------
--- Indices: produto_fiscal
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_produto_fiscal_produto ON produto_fiscal(produto_id);
-
--- --------------------------------------
--- Indices: produto_estoque_movimentacoes
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_prod_estoque_mov_produto_data
-    ON produto_estoque_movimentacoes(produto_id, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_prod_estoque_mov_tipo_data
-    ON produto_estoque_movimentacoes(tipo, created_at DESC);
-
--- --------------------------------------
--- Indices: orcamentos
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_orcamentos_cliente ON orcamentos(cliente_id);
-CREATE INDEX IF NOT EXISTS idx_orcamentos_usuario ON orcamentos(usuario_id);
-CREATE INDEX IF NOT EXISTS idx_orcamentos_status ON orcamentos(status);
-CREATE INDEX IF NOT EXISTS idx_orcamentos_data ON orcamentos(data_orcamento DESC);
-CREATE INDEX IF NOT EXISTS idx_orcamentos_share_token ON orcamentos(share_token) 
-    WHERE share_token IS NOT NULL;
-
--- --------------------------------------
--- Indices: orcamento_itens
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_orcamento_itens_orcamento ON orcamento_itens(orcamento_id);
-CREATE INDEX IF NOT EXISTS idx_orcamento_itens_produto ON orcamento_itens(produto_id)
-    WHERE produto_id IS NOT NULL;
-
--- --------------------------------------
--- Indices OTIMIZADOS: pedidos (Performance Kanban 90% melhor)
--- --------------------------------------
-
--- Indice 1: Composto principal para Kanban
-CREATE INDEX IF NOT EXISTS idx_pedidos_kanban_principal 
-    ON pedidos(ativo, data_pedido DESC, status) 
-    WHERE ativo = TRUE;
-
-COMMENT ON INDEX idx_pedidos_kanban_principal IS 
-'Indice composto otimizado para view Kanban. Reduz tempo de query de 1.2s para 120ms (90% melhoria).
-Ordem dos campos: ativo (filtro WHERE), data_pedido DESC (ordenacao), status (agrupamento Kanban).';
-
--- Indice 2: Cliente (otimizado com WHERE)
-CREATE INDEX IF NOT EXISTS idx_pedidos_cliente_id 
-    ON pedidos(cliente_id) 
-    WHERE ativo = TRUE;
-
-COMMENT ON INDEX idx_pedidos_cliente_id IS 
-'Indice parcial para JOINs com clientes. Ignora pedidos inativos para economizar espaco.';
-
--- Indice 3: Status (otimizado com WHERE)
-CREATE INDEX IF NOT EXISTS idx_pedidos_status 
-    ON pedidos(status) 
-    WHERE ativo = TRUE;
-
-COMMENT ON INDEX idx_pedidos_status IS 
-'Indice parcial para filtros por status. Usado em queries da Lista de Pedidos.';
-
--- Indice 4: Data de pedido (com DESC para ordenacao eficiente)
-CREATE INDEX IF NOT EXISTS idx_pedidos_data_pedido 
-    ON pedidos(data_pedido DESC);
-
-COMMENT ON INDEX idx_pedidos_data_pedido IS 
-'Indice para ordenacao cronologica DESC (mais recente primeiro). Usado em listagens gerais.';
-
--- Indice 5: Observacoes (GIN para busca textual)
-CREATE INDEX IF NOT EXISTS idx_pedidos_observacoes_trgm 
-    ON pedidos USING gin(observacoes gin_trgm_ops);
-
-COMMENT ON INDEX idx_pedidos_observacoes_trgm IS 
-'Indice GIN para busca ILIKE em observacoes. Performance: 800ms para 80ms para 10.000 registros.';
-
--- Indice 6: Outros Indices necessarios
-CREATE INDEX IF NOT EXISTS idx_pedidos_orcamento_id 
-    ON pedidos(orcamento_id) 
-    WHERE orcamento_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_pedidos_orcamento_ativo 
-    ON pedidos(orcamento_id)
-    WHERE orcamento_id IS NOT NULL AND ativo = TRUE;
-
-CREATE INDEX IF NOT EXISTS idx_pedidos_usuario_id 
-    ON pedidos(usuario_id)
-    WHERE usuario_id IS NOT NULL;
-
--- --------------------------------------
--- Indices: pedido_itens
--- --------------------------------------
-CREATE INDEX IF NOT EXISTS idx_pedido_itens_pedido_id ON pedido_itens(pedido_id);
-CREATE INDEX IF NOT EXISTS idx_pedido_itens_produto_id ON pedido_itens(produto_id) 
-    WHERE produto_id IS NOT NULL;
-
--- ============================================================================
--- FUNCOES E TRIGGERS
--- ============================================================================
-
--- Funcao: atualizar campo updated_at automaticamente
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
+    RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
-CREATE OR REPLACE FUNCTION bloquear_delete_update_cr_com_nfe_autorizada()
-RETURNS TRIGGER AS $$
+
+--
+-- Name: FUNCTION atualizar_saldo_conta_trigger(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.atualizar_saldo_conta_trigger() IS 'Trigger para atualizar saldo_atual da conta automaticamente ao inserir/deletar movimentacoes.';
+
+
+--
+-- Name: bloquear_delete_cr_protegida(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.bloquear_delete_cr_protegida() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF OLD.protegido THEN
+        RAISE EXCEPTION 'Conta a receber protegida (origem PDV). Nao pode ser excluida.'
+              USING ERRCODE = '23000';
+    END IF;
+    RETURN OLD;
+END;
+$$;
+
+
+--
+-- Name: bloquear_delete_movimentacao_protegida(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.bloquear_delete_movimentacao_protegida() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF OLD.protegido THEN
+        RAISE EXCEPTION 'Movimentacao protegida (origem PDV). Cancele a venda em vez de excluir.'
+              USING ERRCODE = '23000';
+    END IF;
+    RETURN OLD;
+END;
+$$;
+
+
+--
+-- Name: bloquear_delete_protegido(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.bloquear_delete_protegido() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF OLD.protegido = TRUE THEN
+        RAISE EXCEPTION 'Este registro e protegido e nao pode ser excluido.'
+              USING ERRCODE = '23000';
+    END IF;
+    RETURN OLD;
+END;
+$$;
+
+
+--
+-- Name: bloquear_delete_update_cr_com_nfe_autorizada(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.bloquear_delete_update_cr_com_nfe_autorizada() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 DECLARE
     v_pedido_id UUID;
     v_numero_nfe BIGINT;
@@ -1330,397 +209,40 @@ BEGIN
 
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
-COMMENT ON FUNCTION bloquear_delete_update_cr_com_nfe_autorizada() IS
-'Bloqueia exclusao de contas_receber e cancelamento de status quando houver pedido vinculado com NF-e AUTORIZADA.';
 
-COMMENT ON FUNCTION update_updated_at_column() IS 
-'Funcao trigger para atualizar automaticamente o campo updated_at quando um registro e modificado.';
+--
+-- Name: FUNCTION bloquear_delete_update_cr_com_nfe_autorizada(); Type: COMMENT; Schema: public; Owner: -
+--
 
--- Funcao: atualizar saldo da conta apas movimentacoes
-CREATE OR REPLACE FUNCTION atualizar_saldo_conta_trigger()
-RETURNS TRIGGER AS $$
+COMMENT ON FUNCTION public.bloquear_delete_update_cr_com_nfe_autorizada() IS 'Bloqueia exclusao de contas_receber e cancelamento de status quando houver pedido vinculado com NF-e AUTORIZADA.';
+
+
+--
+-- Name: bloquear_delete_venda_protegida(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.bloquear_delete_venda_protegida() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
-    IF TG_OP = 'INSERT' THEN
-        IF NEW.tipo = 'Entrada' THEN
-            UPDATE contas SET saldo_atual = saldo_atual + NEW.valor WHERE id = NEW.conta_id;
-        ELSE
-            UPDATE contas SET saldo_atual = saldo_atual - NEW.valor WHERE id = NEW.conta_id;
-        END IF;
-    ELSIF TG_OP = 'DELETE' THEN
-        IF OLD.tipo = 'Entrada' THEN
-            UPDATE contas SET saldo_atual = saldo_atual - OLD.valor WHERE id = OLD.conta_id;
-        ELSE
-            UPDATE contas SET saldo_atual = saldo_atual + OLD.valor WHERE id = OLD.conta_id;
-        END IF;
+    IF OLD.protegido THEN
+        RAISE EXCEPTION 'Venda PDV protegida. Use cancelamento (status=cancelado) em vez de DELETE.'
+              USING ERRCODE = '23000';
     END IF;
-    
-    IF TG_OP = 'INSERT' THEN
-        RETURN NEW;
-    ELSIF TG_OP = 'DELETE' THEN
-        RETURN OLD;
-    END IF;
-    
-    RETURN NULL;
+    RETURN OLD;
 END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION atualizar_saldo_conta_trigger() IS 
-'Trigger para atualizar saldo_atual da conta automaticamente ao inserir/deletar movimentacoes.';
-
--- Funcao: calcular data de validade de orcamentos
-CREATE OR REPLACE FUNCTION calcular_validade_orcamento()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.data_validade := (NEW.data_orcamento::date + make_interval(days => NEW.validade_dias));
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION calcular_validade_orcamento() IS 
-'Funcao trigger para calcular automaticamente data_validade baseada em data_orcamento + validade_dias.';
-
--- --------------------------------------
--- Triggers: updated_at
--- --------------------------------------
-
-DROP TRIGGER IF EXISTS trg_niveis_acesso_updated_at ON niveis_acesso;
-CREATE TRIGGER trg_niveis_acesso_updated_at
-    BEFORE UPDATE ON niveis_acesso
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_usuarios_updated_at ON usuarios;
-CREATE TRIGGER trg_usuarios_updated_at
-    BEFORE UPDATE ON usuarios
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_permissoes_personalizadas_updated_at ON permissoes_personalizadas;
-CREATE TRIGGER trg_permissoes_personalizadas_updated_at
-    BEFORE UPDATE ON permissoes_personalizadas
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_clientes_updated_at ON clientes;
-CREATE TRIGGER trg_clientes_updated_at
-    BEFORE UPDATE ON clientes
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_configuracoes_updated_at ON configuracoes;
-CREATE TRIGGER trg_configuracoes_updated_at
-    BEFORE UPDATE ON configuracoes
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_formas_pagamento_updated_at ON formas_pagamento;
-CREATE TRIGGER trg_formas_pagamento_updated_at
-    BEFORE UPDATE ON formas_pagamento
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_contas_updated_at ON contas;
-CREATE TRIGGER trg_contas_updated_at
-    BEFORE UPDATE ON contas
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_categorias_dre_updated_at ON categorias_dre;
-CREATE TRIGGER trg_categorias_dre_updated_at
-    BEFORE UPDATE ON categorias_dre
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_contas_receber_updated_at ON contas_receber;
-CREATE TRIGGER trg_contas_receber_updated_at
-    BEFORE UPDATE ON contas_receber
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_bloquear_delete_cr_com_nfe ON contas_receber;
-CREATE TRIGGER trg_bloquear_delete_cr_com_nfe
-    BEFORE DELETE OR UPDATE ON contas_receber
-    FOR EACH ROW
-    EXECUTE FUNCTION bloquear_delete_update_cr_com_nfe_autorizada();
-
-COMMENT ON TRIGGER trg_bloquear_delete_cr_com_nfe ON contas_receber IS
-'Impede DELETE e mudanca de status para CANCELADO em contas_receber quando o pedido vinculado possui NF-e AUTORIZADA.';
-
-DROP TRIGGER IF EXISTS trg_contas_pagar_updated_at ON contas_pagar;
-CREATE TRIGGER trg_contas_pagar_updated_at
-    BEFORE UPDATE ON contas_pagar
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+$$;
 
 
-DROP TRIGGER IF EXISTS trg_produtos_updated_at ON produtos;
-CREATE TRIGGER trg_produtos_updated_at
-    BEFORE UPDATE ON produtos
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+--
+-- Name: bloquear_licenca_vencida(); Type: FUNCTION; Schema: public; Owner: -
+--
 
-DROP TRIGGER IF EXISTS trg_produto_fiscal_updated_at ON produto_fiscal;
-CREATE TRIGGER trg_produto_fiscal_updated_at
-    BEFORE UPDATE ON produto_fiscal
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_orcamentos_updated_at ON orcamentos;
-CREATE TRIGGER trg_orcamentos_updated_at
-    BEFORE UPDATE ON orcamentos
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_orcamentos_calcular_validade ON orcamentos;
-CREATE TRIGGER trg_orcamentos_calcular_validade
-    BEFORE INSERT OR UPDATE ON orcamentos
-    FOR EACH ROW
-    EXECUTE FUNCTION calcular_validade_orcamento();
-
-DROP TRIGGER IF EXISTS trg_orcamento_itens_updated_at ON orcamento_itens;
-CREATE TRIGGER trg_orcamento_itens_updated_at
-    BEFORE UPDATE ON orcamento_itens
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_pdv_caixas_updated_at ON pdv_caixas;
-CREATE TRIGGER trg_pdv_caixas_updated_at
-    BEFORE UPDATE ON pdv_caixas
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_pedidos_updated_at ON pedidos;
-CREATE TRIGGER trg_pedidos_updated_at
-    BEFORE UPDATE ON pedidos
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_pedido_itens_updated_at ON pedido_itens;
-CREATE TRIGGER trg_pedido_itens_updated_at
-    BEFORE UPDATE ON pedido_itens
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-CREATE TABLE IF NOT EXISTS empresa_fiscal_servico (
-    id                         SERIAL PRIMARY KEY,
-    cnpj                       VARCHAR(14) NOT NULL,
-    razao_social               VARCHAR(150) NOT NULL,
-    inscricao_municipal        VARCHAR(20) NOT NULL,
-    codigo_municipio_ibge      VARCHAR(7) NOT NULL,
-    aliquota_iss_padrao        NUMERIC(5,2) NOT NULL DEFAULT 5.00
-                                  CONSTRAINT chk_empresa_fiscal_servico_aliquota CHECK (aliquota_iss_padrao >= 0),
-    url_webservice_homologacao TEXT,
-    url_webservice_producao    TEXT,
-    usuario_webservice         VARCHAR(100),
-    senha_webservice           VARCHAR(255),
-    ambiente                   VARCHAR(20) NOT NULL DEFAULT 'homologacao'
-                                  CONSTRAINT chk_empresa_fiscal_servico_ambiente
-                                  CHECK (ambiente IN ('homologacao', 'producao')),
-    created_at                 TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                 TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS nota_fiscal_servico (
-    id                   SERIAL PRIMARY KEY,
-    servico_id           UUID NOT NULL REFERENCES servicos(id) ON DELETE CASCADE,
-    numero_nota          VARCHAR(20),
-    serie                VARCHAR(5) NOT NULL DEFAULT 'RPS',
-    numero_rps           INTEGER NOT NULL,
-    status               VARCHAR(20) NOT NULL DEFAULT 'pendente'
-                             CONSTRAINT chk_nota_fiscal_servico_status
-                             CHECK (status IN ('pendente', 'enviada', 'cancelada', 'erro')),
-    xml_enviado          TEXT,
-    xml_retorno          TEXT,
-    protocolo            VARCHAR(100),
-    data_emissao         TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    data_competencia     DATE NOT NULL,
-    valor_servico        NUMERIC(12,2) NOT NULL
-                             CONSTRAINT chk_nota_fiscal_servico_valor_servico CHECK (valor_servico >= 0),
-    aliquota_iss         NUMERIC(5,2) NOT NULL
-                             CONSTRAINT chk_nota_fiscal_servico_aliquota_iss CHECK (aliquota_iss >= 0),
-    valor_iss            NUMERIC(12,2) NOT NULL
-                             CONSTRAINT chk_nota_fiscal_servico_valor_iss CHECK (valor_iss >= 0),
-    codigo_servico_lc116 VARCHAR(10),
-    descricao_servico    TEXT NOT NULL,
-    tomador_nome         VARCHAR(150),
-    tomador_cpf_cnpj     VARCHAR(14),
-    tomador_email        VARCHAR(150),
-    tomador_logradouro   VARCHAR(200),
-    tomador_municipio    VARCHAR(100),
-    tomador_uf           VARCHAR(2),
-    erro_mensagem        TEXT,
-    created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-
-COMMENT ON TABLE empresa_fiscal_servico IS 'Configuracoes do emitente para integracao de NFS-e.';
-DROP TRIGGER IF EXISTS trg_empresa_fiscal_servico_updated_at ON empresa_fiscal_servico;
-CREATE TRIGGER trg_empresa_fiscal_servico_updated_at
-    BEFORE UPDATE ON empresa_fiscal_servico
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
-DROP TRIGGER IF EXISTS trg_nota_fiscal_servico_updated_at ON nota_fiscal_servico;
-CREATE TRIGGER trg_nota_fiscal_servico_updated_at
-    BEFORE UPDATE ON nota_fiscal_servico
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- --------------------------------------
--- Trigger: atualizar saldo de contas
--- --------------------------------------
-
-DROP TRIGGER IF EXISTS trigger_atualizar_saldo_conta ON movimentacoes;
-CREATE TRIGGER trigger_atualizar_saldo_conta
-    AFTER INSERT OR DELETE ON movimentacoes
-    FOR EACH ROW
-    EXECUTE FUNCTION atualizar_saldo_conta_trigger();
-
-COMMENT ON TRIGGER trigger_atualizar_saldo_conta ON movimentacoes IS 
-'Atualiza saldo_atual da conta ao inserir/deletar movimentacoes. 
-UPDATE manual para consistencia.';
-
-
--- Adicionar coluna tipo_origem na tabela movimentacoes se nao existir
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_name = 'movimentacoes' AND column_name = 'tipo_origem'
-    ) THEN
-        ALTER TABLE movimentacoes 
-        ADD COLUMN tipo_origem VARCHAR(30) DEFAULT 'MANUAL',
-        ADD CONSTRAINT chk_movimento_tipo_origem CHECK (tipo_origem IN ('MANUAL', 'RECEBIMENTO', 'PAGAMENTO', 'ESTORNO'));
-        
-        RAISE NOTICE 'Coluna tipo_origem adicionada na tabela movimentacoes';
-    ELSE
-        RAISE NOTICE 'Coluna tipo_origem ja existe na tabela movimentacoes';
-    END IF;
-END $$;
-
--- Analise de Integridade: verificar todas as movimentacoes
-SELECT 
-    COUNT(*) total,
-    COUNT(CASE WHEN tipo_origem IS NULL THEN 1 END) sem_origem,
-    COUNT(CASE WHEN conta_receber_id IS NOT NULL THEN 1 END) de_receber,
-    COUNT(CASE WHEN conta_pagar_id IS NOT NULL THEN 1 END) de_pagar,
-    COUNT(CASE WHEN conta_receber_id IS NULL AND conta_pagar_id IS NULL THEN 1 END) manuais
-FROM movimentacoes;
-
-
--- Adiciona coluna afeta_saldo na tabela movimentacoes
--- Desconto concedido (CR) e desconto obtido (CP) nao devem alterar o saldo da conta BancÃ¡ria,
--- apenas aparecer em movimentacoes e DRE.
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'movimentacoes' AND column_name = 'afeta_saldo'
-    ) THEN
-        ALTER TABLE movimentacoes
-        ADD COLUMN afeta_saldo BOOLEAN NOT NULL DEFAULT TRUE;
-        RAISE NOTICE 'Coluna afeta_saldo adicionada na tabela movimentacoes';
-    ELSE
-        RAISE NOTICE 'Coluna afeta_saldo ja existe na tabela movimentacoes';
-    END IF;
-END $$;
-
--- Atualiza a funcao trigger para respeitar afeta_saldo
-CREATE OR REPLACE FUNCTION atualizar_saldo_conta_trigger()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF TG_OP = 'INSERT' THEN
-        IF NEW.afeta_saldo THEN
-            IF NEW.tipo = 'Entrada' THEN
-                UPDATE contas SET saldo_atual = saldo_atual + NEW.valor WHERE id = NEW.conta_id;
-            ELSE
-                UPDATE contas SET saldo_atual = saldo_atual - NEW.valor WHERE id = NEW.conta_id;
-            END IF;
-        END IF;
-    ELSIF TG_OP = 'DELETE' THEN
-        IF OLD.afeta_saldo THEN
-            IF OLD.tipo = 'Entrada' THEN
-                UPDATE contas SET saldo_atual = saldo_atual - OLD.valor WHERE id = OLD.conta_id;
-            ELSE
-                UPDATE contas SET saldo_atual = saldo_atual + OLD.valor WHERE id = OLD.conta_id;
-            END IF;
-        END IF;
-    END IF;
-
-    IF TG_OP = 'INSERT' THEN
-        RETURN NEW;
-    END IF;
-    RETURN NULL;
-END;
-$$ LANGUAGE plpgsql;
-
--- ============================================================================
--- TABELA DE LICENCA (integrada neste arquivo)
--- Compativel com PostgreSQL 13+
--- Execucao unica no banco do cliente
--- ============================================================================
-
--- Atualizar tabela licenca se ja existir (migracao segura)
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'licenca') THEN
-        -- Adiciona colunas novas se nao existirem
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'licenca' AND column_name = 'dias_restantes') THEN
-            ALTER TABLE licenca ADD COLUMN dias_restantes INT;
-        END IF;
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'licenca' AND column_name = 'ultimo_check') THEN
-            ALTER TABLE licenca ADD COLUMN ultimo_check TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-        END IF;
-        RAISE NOTICE 'Tabela licenca atualizada.';
-    END IF;
-END $$;
-
--- Criacao da tabela licenca (se nao existir)
-CREATE TABLE IF NOT EXISTS licenca (
-    id                  SERIAL          PRIMARY KEY,
-    chave_licenca       VARCHAR(64)     NOT NULL UNIQUE,
-    empresa_nome        VARCHAR(255)    NOT NULL,
-    empresa_cnpj        VARCHAR(18)     NOT NULL,
-    licenca_tipo        VARCHAR(10)     NOT NULL DEFAULT 'mensal'
-                            CONSTRAINT chk_licenca_tipo CHECK (licenca_tipo IN ('mensal', 'anual', 'trial')),
-    licenca_inicio      DATE            NOT NULL DEFAULT CURRENT_DATE,
-    licenca_fim         DATE            NOT NULL,
-    dias_restantes      INT             NOT NULL DEFAULT 0,
-    dias_aviso          INT             NOT NULL DEFAULT 7,
-    status              VARCHAR(15)     NOT NULL DEFAULT 'ativa'
-                            CONSTRAINT chk_licenca_status CHECK (status IN ('ativa', 'bloqueada', 'trial', 'cancelada')),
-    ultimo_check        TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    created_at          TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE licenca IS 'Controle de licenca do sistema. Apenas 1 registro ativo por banco.';
-COMMENT ON COLUMN licenca.dias_restantes IS 'Atualizado automaticamente pelo trigger a cada INSERT/UPDATE.';
-COMMENT ON COLUMN licenca.dias_aviso IS 'Quantos dias antes do vencimento o sistema exibe aviso ao usuario.';
-
--- Trigger: atualiza updated_at automaticamente
-CREATE OR REPLACE FUNCTION update_licenca_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    NEW.ultimo_check = CURRENT_TIMESTAMP;
-    NEW.dias_restantes = GREATEST(0, CAST(NEW.licenca_fim - CURRENT_DATE AS INT));
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS trg_licenca_updated_at ON licenca;
-CREATE TRIGGER trg_licenca_updated_at
-    BEFORE UPDATE ON licenca
-    FOR EACH ROW
-    EXECUTE FUNCTION update_licenca_updated_at();
-
--- Trigger: bloqueia automaticamente licencas vencidas
-CREATE OR REPLACE FUNCTION bloquear_licenca_vencida()
-RETURNS TRIGGER AS $$
+CREATE FUNCTION public.bloquear_licenca_vencida() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 BEGIN
     NEW.dias_restantes = GREATEST(0, CAST(NEW.licenca_fim - CURRENT_DATE AS INT));
     IF NEW.licenca_fim < CURRENT_DATE AND NEW.status = 'ativa' THEN
@@ -1729,224 +251,94 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
-DROP TRIGGER IF EXISTS trg_bloquear_licenca_vencida ON licenca;
-CREATE TRIGGER trg_bloquear_licenca_vencida
-    BEFORE INSERT OR UPDATE ON licenca
-    FOR EACH ROW
-    EXECUTE FUNCTION bloquear_licenca_vencida();
 
--- Indice para consultas de status
-CREATE INDEX IF NOT EXISTS idx_licenca_status ON licenca(status);
-CREATE INDEX IF NOT EXISTS idx_licenca_fim ON licenca(licenca_fim);
+--
+-- Name: bloquear_venda_caixa_fechado(); Type: FUNCTION; Schema: public; Owner: -
+--
 
--- ============================================================================
--- MIGRACAO DE PERMISSOES (consolidada de database/migrations/002_permissoes.sql)
--- ============================================================================
-
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-          AND table_name = 'niveis_acesso'
-    ) THEN
-        UPDATE public.niveis_acesso
-           SET nome = 'Personalizado',
-               descricao = 'Acesso configurado individualmente por modulo'
-         WHERE id = 4
-           AND (
-                nome IS DISTINCT FROM 'Personalizado'
-                OR descricao IS DISTINCT FROM 'Acesso configurado individualmente por modulo'
-           );
-    END IF;
-END $$;
-
-CREATE TABLE IF NOT EXISTS public.modulos (
-    id      SERIAL PRIMARY KEY,
-    slug    VARCHAR(50)  NOT NULL UNIQUE,
-    nome    VARCHAR(100) NOT NULL,
-    icone   VARCHAR(50),
-    ordem   INT DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS public.permissoes_nivel (
-    nivel_acesso_id INT NOT NULL REFERENCES public.niveis_acesso(id) ON DELETE CASCADE,
-    modulo_id       INT NOT NULL REFERENCES public.modulos(id) ON DELETE CASCADE,
-    PRIMARY KEY (nivel_acesso_id, modulo_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.permissoes_usuario (
-    usuario_id  INT NOT NULL REFERENCES public.usuarios(id) ON DELETE CASCADE,
-    modulo_id   INT NOT NULL REFERENCES public.modulos(id) ON DELETE CASCADE,
-    PRIMARY KEY (usuario_id, modulo_id)
-);
-
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-          AND table_name = 'modulos'
-    ) THEN
-        INSERT INTO public.modulos (slug, nome, icone, ordem)
-        VALUES
-            ('dashboard',      'Dashboard',              'fa-gauge',           1),
-            ('clientes',       'Clientes',               'fa-users',           2),
-            ('produtos',       'Produtos',               'fa-boxes',           3),
-            ('orcamentos',     'Orcamentos',             'fa-file-invoice',    4),
-            ('pedidos',        'Pedidos',                'fa-clipboard-list',  5),
-            ('financeiro',     'Financeiro',             'fa-chart-line',      6),
-            ('rel_pedidos',    'Relatorios de Pedidos',  'fa-file-alt',        7),
-            ('rel_financeiro', 'Relatorios Financeiros', 'fa-file-chart-line', 8)
-        ON CONFLICT (slug) DO NOTHING;
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-          AND table_name = 'permissoes_nivel'
-    )
-    AND EXISTS (
-        SELECT 1
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-          AND table_name = 'modulos'
-    )
-    AND EXISTS (
-        SELECT 1
-        FROM information_schema.tables
-        WHERE table_schema = 'public'
-          AND table_name = 'niveis_acesso'
-    ) THEN
-        INSERT INTO public.permissoes_nivel (nivel_acesso_id, modulo_id)
-        SELECT 1, m.id
-          FROM public.modulos m
-         WHERE EXISTS (SELECT 1 FROM public.niveis_acesso na WHERE na.id = 1)
-        ON CONFLICT (nivel_acesso_id, modulo_id) DO NOTHING;
-
-        INSERT INTO public.permissoes_nivel (nivel_acesso_id, modulo_id)
-        SELECT 2, m.id
-          FROM public.modulos m
-         WHERE m.slug IN ('dashboard', 'clientes', 'produtos', 'orcamentos', 'pedidos', 'rel_pedidos')
-           AND EXISTS (SELECT 1 FROM public.niveis_acesso na WHERE na.id = 2)
-        ON CONFLICT (nivel_acesso_id, modulo_id) DO NOTHING;
-
-        INSERT INTO public.permissoes_nivel (nivel_acesso_id, modulo_id)
-        SELECT 3, m.id
-          FROM public.modulos m
-         WHERE m.slug IN ('dashboard', 'financeiro', 'rel_financeiro')
-           AND EXISTS (SELECT 1 FROM public.niveis_acesso na WHERE na.id = 3)
-        ON CONFLICT (nivel_acesso_id, modulo_id) DO NOTHING;
-    END IF;
-END $$;
-
-DO $$
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'usuarios'
-    )
-    AND EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'permissoes_nivel'
-    )
-    AND EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'permissoes_usuario'
-    )
-    AND EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name = 'modulos'
-    ) THEN
-        EXECUTE $view$
-            CREATE OR REPLACE VIEW public.vw_permissoes_usuario AS
-            SELECT
-                u.id AS usuario_id,
-                u.nivel_acesso_id,
-                m.slug AS modulo_slug
-            FROM public.usuarios u
-            JOIN public.permissoes_nivel pn ON pn.nivel_acesso_id = u.nivel_acesso_id
-            JOIN public.modulos m ON m.id = pn.modulo_id
-            WHERE u.nivel_acesso_id <> 4
-            UNION ALL
-            SELECT
-                u.id AS usuario_id,
-                u.nivel_acesso_id,
-                m.slug AS modulo_slug
-            FROM public.usuarios u
-            JOIN public.permissoes_usuario pu ON pu.usuario_id = u.id
-            JOIN public.modulos m ON m.id = pu.modulo_id
-            WHERE u.nivel_acesso_id = 4;
-        $view$;
-    END IF;
-END $$;
-
--- ============================================================================
--- MIGRACAO DE PLANOS NO CLIENTE (consolidada de 003_planos_cliente.sql)
--- ============================================================================
-
-DO $$
+CREATE FUNCTION public.bloquear_venda_caixa_fechado() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
 DECLARE
-    v_added_plano_slug   BOOLEAN := FALSE;
-    v_added_max_usuarios BOOLEAN := FALSE;
+    v_status VARCHAR(20);
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-          FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name = 'licenca'
-           AND column_name = 'plano_slug'
-    ) THEN
-        ALTER TABLE public.licenca
-            ADD COLUMN plano_slug VARCHAR(30) NOT NULL DEFAULT 'profissional';
-        v_added_plano_slug := TRUE;
+    SELECT status INTO v_status FROM pdv_caixas WHERE id = NEW.caixa_id;
+    IF v_status = 'fechado' THEN
+        RAISE EXCEPTION 'Caixa #% esta fechado. Abra um novo caixa para registrar vendas.', NEW.caixa_id
+              USING ERRCODE = '23000';
     END IF;
+    RETURN NEW;
+END;
+$$;
 
-    IF NOT EXISTS (
-        SELECT 1
-          FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name = 'licenca'
-           AND column_name = 'max_usuarios'
-    ) THEN
-        ALTER TABLE public.licenca
-            ADD COLUMN max_usuarios INT DEFAULT 1;
-        v_added_max_usuarios := TRUE;
-    END IF;
 
-    IF v_added_plano_slug OR v_added_max_usuarios THEN
-        RAISE NOTICE 'Colunas plano_slug e/ou max_usuarios adicionadas na tabela licenca';
-    ELSE
-        RAISE NOTICE 'Colunas de plano ja existem';
-    END IF;
-END $$;
+--
+-- Name: calcular_validade_orcamento(); Type: FUNCTION; Schema: public; Owner: -
+--
 
-UPDATE public.licenca
-   SET plano_slug = 'profissional'
- WHERE plano_slug IS NULL
-    OR trim(plano_slug) = '';
+CREATE FUNCTION public.calcular_validade_orcamento() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.data_validade := (NEW.data_orcamento::date + make_interval(days => NEW.validade_dias));
+    RETURN NEW;
+END;
+$$;
 
-UPDATE public.licenca
-   SET max_usuarios = 1
- WHERE plano_slug = 'profissional'
-   AND max_usuarios IS NULL;
 
-CREATE OR REPLACE FUNCTION public.verificar_limite_usuarios()
-RETURNS TABLE (
-    plano_slug      VARCHAR,
-    max_usuarios    INT,
-    total_usuarios  BIGINT,
-    pode_criar      BOOLEAN,
-    mensagem        TEXT
-) AS $$
+--
+-- Name: FUNCTION calcular_validade_orcamento(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.calcular_validade_orcamento() IS 'Funcao trigger para calcular automaticamente data_validade baseada em data_orcamento + validade_dias.';
+
+
+--
+-- Name: update_licenca_updated_at(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_licenca_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    NEW.ultimo_check = CURRENT_TIMESTAMP;
+    NEW.dias_restantes = GREATEST(0, CAST(NEW.licenca_fim - CURRENT_DATE AS INT));
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: update_updated_at_column(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.update_updated_at_column() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+
+--
+-- Name: FUNCTION update_updated_at_column(); Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON FUNCTION public.update_updated_at_column() IS 'Funcao trigger para atualizar automaticamente o campo updated_at quando um registro e modificado.';
+
+
+--
+-- Name: verificar_limite_usuarios(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.verificar_limite_usuarios() RETURNS TABLE(plano_slug character varying, max_usuarios integer, total_usuarios bigint, pode_criar boolean, mensagem text)
+    LANGUAGE plpgsql
+    AS $$
 DECLARE
     v_plano     VARCHAR;
     v_max       INT;
@@ -1994,346 +386,3675 @@ BEGIN
                        || 'Entre em contato para upgrade para o plano Master.', v_max)
         END;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
-DROP VIEW IF EXISTS public.vw_status_plano;
-CREATE VIEW public.vw_status_plano AS
-SELECT
-    l.plano_slug,
-    l.max_usuarios,
-    l.status AS licenca_status,
-    l.licenca_fim,
-    GREATEST(0, CAST(l.licenca_fim - CURRENT_DATE AS INT)) AS dias_restantes,
-    u.total_ativos AS total_usuarios_ativos,
-    u.total_ativos AS total_ativos,
-    CASE
-        WHEN l.max_usuarios IS NULL THEN TRUE
-        WHEN u.total_ativos < l.max_usuarios THEN TRUE
-        ELSE FALSE
-    END AS pode_criar_usuario,
-    CASE
-        WHEN l.max_usuarios IS NULL THEN TRUE
-        WHEN u.total_ativos < l.max_usuarios THEN TRUE
-        ELSE FALSE
-    END AS pode_criar
-FROM public.licenca l
-CROSS JOIN LATERAL (
-    SELECT COUNT(*)::BIGINT AS total_ativos
-    FROM public.usuarios
-    WHERE ativo = TRUE
-      AND NOT (
-          LOWER(email) = LOWER('admin@suporte.com')
-          AND nivel_acesso_id = 1
-      )
-) u
-LIMIT 1;
 
--- ============================================================================
--- BLOCO PARA cliente-base.sql
--- Flag de faturamento fiscal no pedido
--- ============================================================================
+SET default_table_access_method = heap;
 
-ALTER TABLE pedidos
-    ADD COLUMN IF NOT EXISTS nfe_emitida BOOLEAN NOT NULL DEFAULT FALSE;
+--
+-- Name: auditoria; Type: TABLE; Schema: public; Owner: -
+--
 
--- ============================================================================
--- BLOCO PARA cliente-base.sql
--- Tabela de NF-e vinculada ao pedido
--- 1 pedido -> 1 NF-e
--- ============================================================================
-
-CREATE TABLE IF NOT EXISTS pedido_nfe (
-    id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    pedido_id           UUID
-                            REFERENCES pedidos(id) ON DELETE CASCADE,
-    numero_nfe          BIGINT NOT NULL,
-    chave_acesso        VARCHAR(44) NOT NULL UNIQUE,
-    status              VARCHAR(20) NOT NULL DEFAULT 'PENDENTE'
-                            CONSTRAINT chk_pedido_nfe_status
-                            CHECK (status IN (
-                                'PENDENTE',
-                                'EMITIDA',
-                                'AUTORIZADA',
-                                'CANCELADA',
-                                'REJEITADA',
-                                'INUTILIZADA'
-                            )),
-    data_emissao        TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    xml_nfe             TEXT,
-    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_pedido_nfe_numero CHECK (numero_nfe > 0),
-    CONSTRAINT chk_pedido_nfe_chave_acesso CHECK (char_length(chave_acesso) = 44)
+CREATE TABLE public.auditoria (
+    id integer NOT NULL,
+    usuario_id integer,
+    acao character varying(100) NOT NULL,
+    tabela character varying(100) NOT NULL,
+    registro_id integer,
+    dados_antigos jsonb,
+    dados_novos jsonb,
+    ip_address character varying(45),
+    user_agent text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
 );
 
--- ============================================================================
--- BLOCO PARA cliente-base.sql
--- Tabela de dados da empresa local
--- Espelha dados basicos da empresa do license-system + endereco local
--- ============================================================================
 
-CREATE TABLE IF NOT EXISTS empresa_local (
-    id                  SERIAL PRIMARY KEY,
-    cnpj                VARCHAR(18) NOT NULL UNIQUE,
-    nome                VARCHAR(255) NOT NULL,
-    contato             VARCHAR(255),
-    email               VARCHAR(255),
-    telefone            VARCHAR(20),
-    logradouro          VARCHAR(255),
-    numero              VARCHAR(20),
-    complemento         VARCHAR(255),
-    bairro              VARCHAR(120),
-    cidade              VARCHAR(120),
-    uf                  CHAR(2),
-    cep                 VARCHAR(10),
-    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT chk_empresa_local_uf
-        CHECK (uf IS NULL OR uf ~ '^[A-Z]{2}$')
+--
+-- Name: auditoria_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.auditoria_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: auditoria_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.auditoria_id_seq OWNED BY public.auditoria.id;
+
+
+--
+-- Name: auditoria_usuarios; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.auditoria_usuarios (
+    id integer NOT NULL,
+    usuario_id integer,
+    usuario_nome character varying(150) NOT NULL,
+    modulo character varying(60) NOT NULL,
+    acao character varying(40) NOT NULL,
+    entidade character varying(60) NOT NULL,
+    entidade_id integer,
+    descricao text,
+    dados jsonb,
+    ip character varying(45),
+    user_agent character varying(255),
+    created_at timestamp without time zone DEFAULT now() NOT NULL
 );
 
--- ============================================================================
--- BLOCO PARA cliente-base.sql
--- Constraints adicionais de seguranca de dados
--- ============================================================================
 
-ALTER TABLE pedido_nfe
-    ADD CONSTRAINT chk_pedido_nfe_xml
-    CHECK (xml_nfe IS NULL OR length(xml_nfe) > 0);
+--
+-- Name: auditoria_usuarios_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
 
-ALTER TABLE empresa_local
-    ADD CONSTRAINT chk_empresa_local_cnpj
-    CHECK (char_length(regexp_replace(cnpj, '\D', '', 'g')) IN (11, 14));
+CREATE SEQUENCE public.auditoria_usuarios_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
 
-ALTER TABLE empresa_local
-    ADD CONSTRAINT chk_empresa_local_cep
-    CHECK (cep IS NULL OR char_length(regexp_replace(cep, '\D', '', 'g')) = 8);
 
--- ============================================================================
--- BLOCO FISCAL NF-e
--- Alteracoes incrementais para emissao fiscal
--- ============================================================================
+--
+-- Name: auditoria_usuarios_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
 
-ALTER TABLE produto_fiscal
-    ADD COLUMN IF NOT EXISTS cst_pis VARCHAR(2),
-    ADD COLUMN IF NOT EXISTS cst_cofins VARCHAR(2),
-    ADD COLUMN IF NOT EXISTS modalidade_bc_icms CHAR(1) CHECK (modalidade_bc_icms IN ('0','1','2','3')),
-    ADD COLUMN IF NOT EXISTS aliquota_icms_st NUMERIC(8,4) DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS reducao_bc_icms NUMERIC(8,4) DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS codigo_beneficio_fiscal VARCHAR(10),
-    ADD COLUMN IF NOT EXISTS ind_escala CHAR(1) DEFAULT 'S' CHECK (ind_escala IN ('S','N')),
-    ADD COLUMN IF NOT EXISTS cnpj_fabricante VARCHAR(18);
+ALTER SEQUENCE public.auditoria_usuarios_id_seq OWNED BY public.auditoria_usuarios.id;
 
-COMMENT ON COLUMN produto_fiscal.cst_pis IS
-'Codigo CST do PIS usado na composicao dos tributos da NF-e.';
-COMMENT ON COLUMN produto_fiscal.cst_cofins IS
-'Codigo CST do COFINS usado na composicao dos tributos da NF-e.';
-COMMENT ON COLUMN produto_fiscal.modalidade_bc_icms IS
-'Modalidade de determinacao da base de calculo do ICMS na NF-e.';
-COMMENT ON COLUMN produto_fiscal.aliquota_icms_st IS
-'Aliquota de ICMS ST informada na NF-e quando houver substituicao tributaria.';
-COMMENT ON COLUMN produto_fiscal.reducao_bc_icms IS
-'Percentual de reducao da base de calculo do ICMS destacado na NF-e.';
-COMMENT ON COLUMN produto_fiscal.codigo_beneficio_fiscal IS
-'Codigo de beneficio fiscal vinculado ao item para emissao da NF-e.';
-COMMENT ON COLUMN produto_fiscal.ind_escala IS
-'Indicador de relevancia em escala industrial do fabricante para a NF-e.';
-COMMENT ON COLUMN produto_fiscal.cnpj_fabricante IS
-'CNPJ do fabricante exigido na NF-e quando aplicavel ao item.';
 
-ALTER TABLE empresa_local
-    ADD COLUMN IF NOT EXISTS inscricao_estadual VARCHAR(20),
-    ADD COLUMN IF NOT EXISTS inscricao_municipal VARCHAR(20),
-    ADD COLUMN IF NOT EXISTS codigo_municipio VARCHAR(7),
-    ADD COLUMN IF NOT EXISTS regime_tributario CHAR(1) DEFAULT '1' CHECK (regime_tributario IN ('1','2','3')),
-    ADD COLUMN IF NOT EXISTS ambiente_nfe CHAR(1) DEFAULT '2' CHECK (ambiente_nfe IN ('1','2')),
-    ADD COLUMN IF NOT EXISTS serie_nfe VARCHAR(3) DEFAULT '001',
-    ADD COLUMN IF NOT EXISTS proximo_numero_nfe BIGINT DEFAULT 1,
-    ADD COLUMN IF NOT EXISTS certificado_path VARCHAR(500),
-    ADD COLUMN IF NOT EXISTS certificado_senha VARCHAR(255);
+--
+-- Name: categorias_dre; Type: TABLE; Schema: public; Owner: -
+--
 
-ALTER TABLE clientes
-    ADD COLUMN IF NOT EXISTS eh_cliente BOOLEAN NOT NULL DEFAULT TRUE,
-    ADD COLUMN IF NOT EXISTS eh_fornecedor BOOLEAN NOT NULL DEFAULT FALSE,
-    ADD COLUMN IF NOT EXISTS numero_endereco VARCHAR(20),
-    ADD COLUMN IF NOT EXISTS codigo_municipio VARCHAR(7),
-    ADD COLUMN IF NOT EXISTS ie VARCHAR(20),
-    ADD COLUMN IF NOT EXISTS ind_ie_dest CHAR(1) DEFAULT '9' CHECK (ind_ie_dest IN ('1','2','9'));
+CREATE TABLE public.categorias_dre (
+    id integer NOT NULL,
+    nome character varying(255) NOT NULL,
+    tipo character varying(50) NOT NULL,
+    descricao text,
+    ordem integer DEFAULT 0,
+    ativo boolean DEFAULT true,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT categorias_dre_tipo_check CHECK (((tipo)::text = ANY ((ARRAY['Receita'::character varying, 'Despesa'::character varying, 'Deducao'::character varying, 'CPV'::character varying, 'Despesa Operacional'::character varying, 'Despesa Financeira'::character varying, 'Tributo'::character varying, 'Outras'::character varying])::text[])))
+);
 
-ALTER TABLE pedido_nfe
-  ADD COLUMN IF NOT EXISTS n_prot VARCHAR(15);
-COMMENT ON COLUMN pedido_nfe.n_prot IS
-'Numero do protocolo de autorizacao SEFAZ.
+
+--
+-- Name: categorias_dre_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.categorias_dre_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: categorias_dre_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.categorias_dre_id_seq OWNED BY public.categorias_dre.id;
+
+
+--
+-- Name: clientes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.clientes (
+    id integer NOT NULL,
+    uuid uuid DEFAULT public.uuid_generate_v4(),
+    nome character varying(100) NOT NULL,
+    cpf_cnpj character varying(20) NOT NULL,
+    email character varying(100) NOT NULL,
+    telefone character varying(20),
+    eh_cliente boolean DEFAULT true NOT NULL,
+    eh_fornecedor boolean DEFAULT false NOT NULL,
+    endereco text,
+    cidade character varying(100),
+    estado character(2),
+    cep character varying(10),
+    ativo boolean DEFAULT true,
+    usuario_id integer,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    numero_endereco character varying(20),
+    codigo_municipio character varying(7),
+    ie character varying(20),
+    ind_ie_dest character(1) DEFAULT '9'::bpchar,
+    CONSTRAINT clientes_ind_ie_dest_check CHECK ((ind_ie_dest = ANY (ARRAY['1'::bpchar, '2'::bpchar, '9'::bpchar])))
+);
+
+
+--
+-- Name: clientes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.clientes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: clientes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.clientes_id_seq OWNED BY public.clientes.id;
+
+
+--
+-- Name: configuracoes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.configuracoes (
+    id integer NOT NULL,
+    chave character varying(100) NOT NULL,
+    valor text,
+    descricao text,
+    tipo character varying(50) DEFAULT 'text'::character varying,
+    categoria character varying(50) DEFAULT 'Geral'::character varying,
+    ordem integer DEFAULT 0,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: configuracoes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.configuracoes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: configuracoes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.configuracoes_id_seq OWNED BY public.configuracoes.id;
+
+
+--
+-- Name: contas; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contas (
+    id integer NOT NULL,
+    nome character varying(100) NOT NULL,
+    tipo character varying(20) NOT NULL,
+    banco character varying(100),
+    agencia character varying(20),
+    numero_conta character varying(30),
+    saldo_inicial numeric(15,4) DEFAULT 0,
+    saldo_atual numeric(15,4) DEFAULT 0,
+    ativo boolean DEFAULT true,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_contas_tipo CHECK (((tipo)::text = ANY ((ARRAY['Banco'::character varying, 'Caixa'::character varying, 'Poupanca'::character varying, 'Investimento'::character varying])::text[])))
+);
+
+
+--
+-- Name: contas_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.contas_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: contas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.contas_id_seq OWNED BY public.contas.id;
+
+
+--
+-- Name: contas_pagar; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contas_pagar (
+    id integer NOT NULL,
+    descricao character varying(255) NOT NULL,
+    fornecedor character varying(255),
+    categoria_dre_id integer,
+    valor numeric(15,4) NOT NULL,
+    data_vencimento date NOT NULL,
+    data_pagamento date,
+    valor_pago numeric(15,4),
+    desconto numeric(15,4) DEFAULT 0,
+    status character varying(20) DEFAULT 'PENDENTE'::character varying,
+    observacoes text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    cliente_id integer,
+    protegido boolean DEFAULT false NOT NULL,
+    CONSTRAINT chk_contas_pagar_status CHECK (((status)::text = ANY ((ARRAY['PENDENTE'::character varying, 'PAGO'::character varying, 'VENCIDO'::character varying, 'CANCELADO'::character varying])::text[])))
+);
+
+
+--
+-- Name: contas_pagar_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.contas_pagar_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: contas_pagar_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.contas_pagar_id_seq OWNED BY public.contas_pagar.id;
+
+
+--
+-- Name: contas_receber; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contas_receber (
+    id integer NOT NULL,
+    descricao character varying(255) NOT NULL,
+    cliente_id integer,
+    forma_pagamento_id integer,
+    categoria_dre_id integer,
+    valor numeric(15,4) NOT NULL,
+    data_vencimento date NOT NULL,
+    data_pagamento date,
+    valor_pago numeric(15,4),
+    desconto numeric(15,4) DEFAULT 0,
+    status character varying(20) DEFAULT 'PENDENTE'::character varying,
+    observacoes text,
+    pedido_id uuid,
+    origem character varying(50),
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    protegido boolean DEFAULT false NOT NULL,
+    pdv_venda_id integer,
+    CONSTRAINT chk_contas_receber_status CHECK (((status)::text = ANY ((ARRAY['PENDENTE'::character varying, 'PAGO'::character varying, 'VENCIDO'::character varying, 'CANCELADO'::character varying])::text[]))),
+    CONSTRAINT chk_cr_origem CHECK (((origem)::text = ANY ((ARRAY['PDV'::character varying, 'MANUAL'::character varying, 'PEDIDO'::character varying, 'SERVICO'::character varying, 'ORCAMENTO'::character varying])::text[])))
+);
+
+
+--
+-- Name: COLUMN contas_receber.pedido_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contas_receber.pedido_id IS 'FK para pedidos quando origem = PEDIDO.';
+
+
+--
+-- Name: COLUMN contas_receber.origem; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.contas_receber.origem IS 'Origem do lancamento: PEDIDO, PDV, MANUAL, IMPORTACAO.';
+
+
+--
+-- Name: contas_receber_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.contas_receber_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: contas_receber_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.contas_receber_id_seq OWNED BY public.contas_receber.id;
+
+
+--
+-- Name: empresa_fiscal_servico; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.empresa_fiscal_servico (
+    id integer NOT NULL,
+    cnpj character varying(14) NOT NULL,
+    razao_social character varying(150) NOT NULL,
+    inscricao_municipal character varying(20) NOT NULL,
+    codigo_municipio_ibge character varying(7) NOT NULL,
+    aliquota_iss_padrao numeric(5,2) DEFAULT 5.00 NOT NULL,
+    url_webservice_homologacao text,
+    url_webservice_producao text,
+    usuario_webservice character varying(100),
+    senha_webservice character varying(255),
+    ambiente character varying(20) DEFAULT 'homologacao'::character varying NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_empresa_fiscal_servico_aliquota CHECK ((aliquota_iss_padrao >= (0)::numeric)),
+    CONSTRAINT chk_empresa_fiscal_servico_ambiente CHECK (((ambiente)::text = ANY ((ARRAY['homologacao'::character varying, 'producao'::character varying])::text[])))
+);
+
+
+--
+-- Name: TABLE empresa_fiscal_servico; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.empresa_fiscal_servico IS 'Configuracoes do emitente para integracao de NFS-e.';
+
+
+--
+-- Name: empresa_fiscal_servico_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.empresa_fiscal_servico_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: empresa_fiscal_servico_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.empresa_fiscal_servico_id_seq OWNED BY public.empresa_fiscal_servico.id;
+
+
+--
+-- Name: empresa_local; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.empresa_local (
+    id integer NOT NULL,
+    cnpj character varying(18) NOT NULL,
+    nome character varying(255) NOT NULL,
+    contato character varying(255),
+    email character varying(255),
+    telefone character varying(20),
+    logradouro character varying(255),
+    numero character varying(20),
+    complemento character varying(255),
+    bairro character varying(120),
+    cidade character varying(120),
+    uf character(2),
+    cep character varying(10),
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    inscricao_estadual character varying(20),
+    inscricao_municipal character varying(20),
+    codigo_municipio character varying(7),
+    regime_tributario character(1) DEFAULT '1'::bpchar,
+    ambiente_nfe character(1) DEFAULT '2'::bpchar,
+    serie_nfe character varying(3) DEFAULT '001'::character varying,
+    proximo_numero_nfe bigint DEFAULT 1,
+    certificado_path character varying(500),
+    certificado_senha character varying(255),
+    CONSTRAINT chk_empresa_local_cep CHECK (((cep IS NULL) OR (char_length(regexp_replace((cep)::text, '\D'::text, ''::text, 'g'::text)) = 8))),
+    CONSTRAINT chk_empresa_local_cnpj CHECK ((char_length(regexp_replace((cnpj)::text, '\D'::text, ''::text, 'g'::text)) = ANY (ARRAY[11, 14]))),
+    CONSTRAINT chk_empresa_local_uf CHECK (((uf IS NULL) OR (uf ~ '^[A-Z]{2}$'::text))),
+    CONSTRAINT empresa_local_ambiente_nfe_check CHECK ((ambiente_nfe = ANY (ARRAY['1'::bpchar, '2'::bpchar]))),
+    CONSTRAINT empresa_local_regime_tributario_check CHECK ((regime_tributario = ANY (ARRAY['1'::bpchar, '2'::bpchar, '3'::bpchar])))
+);
+
+
+--
+-- Name: empresa_local_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.empresa_local_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: empresa_local_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.empresa_local_id_seq OWNED BY public.empresa_local.id;
+
+
+--
+-- Name: formas_pagamento; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.formas_pagamento (
+    id integer NOT NULL,
+    nome character varying(100) NOT NULL,
+    tipo character varying(3) NOT NULL,
+    descricao text,
+    adquirente_id integer,
+    taxa numeric(10,4) DEFAULT 0 NOT NULL,
+    prazo_dias integer DEFAULT 0 NOT NULL,
+    conta_id integer,
+    ativo boolean DEFAULT true,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_formas_pagamento_tipo CHECK (((tipo)::text = ANY ((ARRAY['D'::character varying, 'PIX'::character varying, 'TB'::character varying, 'CC'::character varying, 'CD'::character varying, 'BOL'::character varying, 'AF'::character varying])::text[])))
+);
+
+
+--
+-- Name: formas_pagamento_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.formas_pagamento_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: formas_pagamento_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.formas_pagamento_id_seq OWNED BY public.formas_pagamento.id;
+
+
+--
+-- Name: licenca; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.licenca (
+    id integer NOT NULL,
+    chave_licenca character varying(64) NOT NULL,
+    empresa_nome character varying(255) NOT NULL,
+    empresa_cnpj character varying(18) NOT NULL,
+    licenca_tipo character varying(10) DEFAULT 'mensal'::character varying NOT NULL,
+    licenca_inicio date DEFAULT CURRENT_DATE NOT NULL,
+    licenca_fim date NOT NULL,
+    dias_restantes integer DEFAULT 0 NOT NULL,
+    dias_aviso integer DEFAULT 7 NOT NULL,
+    status character varying(15) DEFAULT 'ativa'::character varying NOT NULL,
+    ultimo_check timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    plano_slug character varying(30) DEFAULT 'profissional'::character varying NOT NULL,
+    max_usuarios integer DEFAULT 1,
+    CONSTRAINT chk_licenca_status CHECK (((status)::text = ANY ((ARRAY['ativa'::character varying, 'bloqueada'::character varying, 'trial'::character varying, 'cancelada'::character varying])::text[]))),
+    CONSTRAINT chk_licenca_tipo CHECK (((licenca_tipo)::text = ANY ((ARRAY['mensal'::character varying, 'anual'::character varying, 'trial'::character varying])::text[])))
+);
+
+
+--
+-- Name: TABLE licenca; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.licenca IS 'Controle de licenca do sistema. Apenas 1 registro ativo por banco.';
+
+
+--
+-- Name: COLUMN licenca.dias_restantes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.licenca.dias_restantes IS 'Atualizado automaticamente pelo trigger a cada INSERT/UPDATE.';
+
+
+--
+-- Name: COLUMN licenca.dias_aviso; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.licenca.dias_aviso IS 'Quantos dias antes do vencimento o sistema exibe aviso ao usuario.';
+
+
+--
+-- Name: licenca_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.licenca_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: licenca_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.licenca_id_seq OWNED BY public.licenca.id;
+
+
+--
+-- Name: modulos; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.modulos (
+    id integer NOT NULL,
+    slug character varying(50) NOT NULL,
+    nome character varying(100) NOT NULL,
+    icone character varying(50),
+    ordem integer DEFAULT 0
+);
+
+
+--
+-- Name: modulos_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.modulos_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: modulos_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.modulos_id_seq OWNED BY public.modulos.id;
+
+
+--
+-- Name: movimentacoes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.movimentacoes (
+    id integer NOT NULL,
+    conta_id integer NOT NULL,
+    tipo character varying(20) NOT NULL,
+    valor numeric(15,4) NOT NULL,
+    data_movimentacao timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    descricao text,
+    desconto numeric(15,4) DEFAULT 0,
+    categoria_dre_id integer,
+    forma_pagamento_id integer,
+    conta_receber_id integer,
+    conta_pagar_id integer,
+    pedido_id uuid,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    tipo_origem character varying(30) DEFAULT 'MANUAL'::character varying,
+    afeta_saldo boolean DEFAULT true NOT NULL,
+    protegido boolean DEFAULT false NOT NULL,
+    CONSTRAINT chk_movimentacoes_tipo CHECK (((tipo)::text = ANY ((ARRAY['Entrada'::character varying, 'SaÃ­da'::character varying])::text[]))),
+    CONSTRAINT chk_movimentacoes_valor CHECK ((valor > (0)::numeric)),
+    CONSTRAINT chk_movimento_tipo_origem CHECK (((tipo_origem)::text = ANY ((ARRAY['MANUAL'::character varying, 'RECEBIMENTO'::character varying, 'PAGAMENTO'::character varying, 'ESTORNO'::character varying])::text[])))
+);
+
+
+--
+-- Name: COLUMN movimentacoes.protegido; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.movimentacoes.protegido IS 'TRUE quando movimentacao foi gerada pelo PDV e nao pode ser excluida manualmente.';
+
+
+--
+-- Name: movimentacoes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.movimentacoes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: movimentacoes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.movimentacoes_id_seq OWNED BY public.movimentacoes.id;
+
+
+--
+-- Name: niveis_acesso; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.niveis_acesso (
+    id integer NOT NULL,
+    nome character varying(50) NOT NULL,
+    descricao text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: niveis_acesso_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.niveis_acesso_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: niveis_acesso_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.niveis_acesso_id_seq OWNED BY public.niveis_acesso.id;
+
+
+--
+-- Name: nota_fiscal_servico; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.nota_fiscal_servico (
+    id integer NOT NULL,
+    servico_id uuid,
+    numero_nota character varying(20),
+    serie character varying(5) DEFAULT 'RPS'::character varying NOT NULL,
+    numero_rps integer NOT NULL,
+    status character varying(20) DEFAULT 'pendente'::character varying NOT NULL,
+    xml_enviado text,
+    xml_retorno text,
+    protocolo character varying(100),
+    data_emissao timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    data_competencia date NOT NULL,
+    valor_servico numeric(12,2) NOT NULL,
+    aliquota_iss numeric(5,2) NOT NULL,
+    valor_iss numeric(12,2) NOT NULL,
+    codigo_servico_lc116 character varying(10),
+    descricao_servico text NOT NULL,
+    tomador_nome character varying(150),
+    tomador_cpf_cnpj character varying(14),
+    tomador_email character varying(150),
+    tomador_logradouro character varying(200),
+    tomador_municipio character varying(100),
+    tomador_uf character varying(2),
+    erro_mensagem text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_nota_fiscal_servico_aliquota_iss CHECK ((aliquota_iss >= (0)::numeric)),
+    CONSTRAINT chk_nota_fiscal_servico_status CHECK (((status)::text = ANY ((ARRAY['pendente'::character varying, 'enviada'::character varying, 'cancelada'::character varying, 'erro'::character varying])::text[]))),
+    CONSTRAINT chk_nota_fiscal_servico_valor_iss CHECK ((valor_iss >= (0)::numeric)),
+    CONSTRAINT chk_nota_fiscal_servico_valor_servico CHECK ((valor_servico >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE nota_fiscal_servico; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.nota_fiscal_servico IS 'Reservado para NFS-e futura (mini-modulo de servicos).';
+
+
+--
+-- Name: COLUMN nota_fiscal_servico.servico_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.nota_fiscal_servico.servico_id IS 'Placeholder para vinculo futuro com nova tabela de servicos (mini-modulo).';
+
+
+--
+-- Name: COLUMN nota_fiscal_servico.numero_rps; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.nota_fiscal_servico.numero_rps IS 'Sequencial do RPS usado antes da autorizacao municipal.';
+
+
+--
+-- Name: nota_fiscal_servico_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.nota_fiscal_servico_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: nota_fiscal_servico_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.nota_fiscal_servico_id_seq OWNED BY public.nota_fiscal_servico.id;
+
+
+--
+-- Name: notificacoes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notificacoes (
+    id integer NOT NULL,
+    usuario_id integer NOT NULL,
+    titulo character varying(255) NOT NULL,
+    mensagem text NOT NULL,
+    tipo character varying(50),
+    link character varying(255),
+    lida boolean DEFAULT false,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: notificacoes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.notificacoes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: notificacoes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.notificacoes_id_seq OWNED BY public.notificacoes.id;
+
+
+--
+-- Name: pdv_caixas; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pdv_caixas (
+    id integer NOT NULL,
+    usuario_abertura_id integer NOT NULL,
+    numero_caixa integer NOT NULL,
+    status character varying(20) DEFAULT 'aberto'::character varying NOT NULL,
+    valor_suprimento numeric(12,2) DEFAULT 0 NOT NULL,
+    data_abertura timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    data_fechamento timestamp with time zone,
+    fechamento_dinheiro numeric(12,2),
+    fechamento_cartao numeric(12,2),
+    fechamento_pix numeric(12,2),
+    fechamento_faturar numeric(12,2),
+    sistema_dinheiro numeric(12,2),
+    sistema_cartao numeric(12,2),
+    sistema_pix numeric(12,2),
+    sistema_faturar numeric(12,2),
+    diferenca_dinheiro numeric(12,2),
+    diferenca_cartao numeric(12,2),
+    diferenca_pix numeric(12,2),
+    diferenca_faturar numeric(12,2),
+    diferenca_total numeric(12,2),
+    observacao text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    total_vendas numeric(15,2) DEFAULT 0 NOT NULL,
+    qtd_vendas integer DEFAULT 0 NOT NULL,
+    conferencia_concluida boolean DEFAULT false NOT NULL,
+    conferencia_em timestamp with time zone,
+    conferencia_usuario_id integer,
+    CONSTRAINT pdv_caixas_status_check CHECK (((status)::text = ANY ((ARRAY['aberto'::character varying, 'fechado'::character varying])::text[])))
+);
+
+
+--
+-- Name: TABLE pdv_caixas; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pdv_caixas IS 'Sessao de caixa do PDV com abertura, fechamento cego e conferencia.';
+
+
+--
+-- Name: COLUMN pdv_caixas.total_vendas; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pdv_caixas.total_vendas IS 'Soma acumulada de pdv_lancamentos.valor_total neste caixa.';
+
+
+--
+-- Name: COLUMN pdv_caixas.qtd_vendas; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pdv_caixas.qtd_vendas IS 'Quantidade de lancamentos registrados neste caixa.';
+
+
+--
+-- Name: pdv_caixas_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.pdv_caixas_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pdv_caixas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pdv_caixas_id_seq OWNED BY public.pdv_caixas.id;
+
+
+--
+-- Name: pdv_conferencia_itens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pdv_conferencia_itens (
+    id integer NOT NULL,
+    caixa_id integer NOT NULL,
+    forma_pagamento_id integer NOT NULL,
+    valor_sistema numeric(12,2) DEFAULT 0 NOT NULL,
+    valor_informado numeric(12,2) DEFAULT 0 NOT NULL,
+    diferenca numeric(12,2) GENERATED ALWAYS AS ((valor_informado - valor_sistema)) STORED,
+    conferido_em timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: pdv_conferencia_itens_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.pdv_conferencia_itens_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pdv_conferencia_itens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pdv_conferencia_itens_id_seq OWNED BY public.pdv_conferencia_itens.id;
+
+
+--
+-- Name: pdv_lancamentos; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pdv_lancamentos (
+    id integer NOT NULL,
+    caixa_id integer NOT NULL,
+    usuario_id integer NOT NULL,
+    tipo character varying(20) NOT NULL,
+    pedido_id uuid NOT NULL,
+    valor_total numeric(12,2) NOT NULL,
+    forma_pagamento character varying(20) NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT pdv_lancamentos_forma_pagamento_check CHECK (((forma_pagamento)::text = ANY ((ARRAY['dinheiro'::character varying, 'cartao'::character varying, 'pix'::character varying, 'a_faturar'::character varying])::text[]))),
+    CONSTRAINT pdv_lancamentos_tipo_check CHECK (((tipo)::text = 'pedido'::text)),
+    CONSTRAINT pdv_lancamentos_valor_total_check CHECK ((valor_total >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE pdv_lancamentos; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pdv_lancamentos IS 'Lancamentos de pedidos vinculados a um caixa do PDV.';
+
+
+--
+-- Name: COLUMN pdv_lancamentos.pedido_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pdv_lancamentos.pedido_id IS 'FK real para pedidos.id (substitui referencia_id UUID generico).';
+
+
+--
+-- Name: pdv_lancamentos_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.pdv_lancamentos_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pdv_lancamentos_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pdv_lancamentos_id_seq OWNED BY public.pdv_lancamentos.id;
+
+
+--
+-- Name: pdv_venda_itens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pdv_venda_itens (
+    id integer NOT NULL,
+    venda_id integer NOT NULL,
+    tipo_item character varying(20) NOT NULL,
+    produto_id integer,
+    servico_id integer,
+    nome_item character varying(255) NOT NULL,
+    quantidade numeric(15,4) NOT NULL,
+    valor_unitario numeric(15,4) NOT NULL,
+    valor_total_item numeric(15,4) NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_pdv_venda_item_qtd CHECK ((quantidade > (0)::numeric)),
+    CONSTRAINT chk_pdv_venda_item_ref CHECK (((((tipo_item)::text = 'PRODUTO'::text) AND (servico_id IS NULL)) OR (((tipo_item)::text = 'SERVICO'::text) AND (produto_id IS NULL)))),
+    CONSTRAINT chk_pdv_venda_item_tipo CHECK (((tipo_item)::text = ANY ((ARRAY['PRODUTO'::character varying, 'SERVICO'::character varying])::text[]))),
+    CONSTRAINT chk_pdv_venda_item_vt CHECK ((valor_total_item >= (0)::numeric)),
+    CONSTRAINT chk_pdv_venda_item_vu CHECK ((valor_unitario >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE pdv_venda_itens; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pdv_venda_itens IS 'Itens (produto ou servico) de cada venda PDV. Snapshot no nome_item.';
+
+
+--
+-- Name: pdv_venda_itens_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.pdv_venda_itens_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pdv_venda_itens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pdv_venda_itens_id_seq OWNED BY public.pdv_venda_itens.id;
+
+
+--
+-- Name: pdv_vendas; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pdv_vendas (
+    id integer NOT NULL,
+    caixa_id integer NOT NULL,
+    usuario_id integer NOT NULL,
+    cliente_id integer,
+    numero bigint NOT NULL,
+    status character varying(20) DEFAULT 'faturado'::character varying NOT NULL,
+    forma_pagamento_id integer,
+    desconto_tipo character varying(20),
+    desconto_valor numeric(15,2) DEFAULT 0 NOT NULL,
+    valor_total numeric(15,4) NOT NULL,
+    observacoes text,
+    origem character varying(20) DEFAULT 'rapida'::character varying NOT NULL,
+    protegido boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    cancelado_por_id integer,
+    cancelado_em timestamp with time zone,
+    motivo_cancelamento text,
+    faturada_em timestamp with time zone,
+    conferida boolean DEFAULT false NOT NULL,
+    caixa_conferencia_id integer,
+    CONSTRAINT chk_pdv_vendas_desc_tipo CHECK (((desconto_tipo IS NULL) OR ((desconto_tipo)::text = ANY ((ARRAY['VALOR'::character varying, 'PERCENTUAL'::character varying])::text[])))),
+    CONSTRAINT chk_pdv_vendas_desc_val CHECK ((desconto_valor >= (0)::numeric)),
+    CONSTRAINT chk_pdv_vendas_forma_obrig CHECK ((((status)::text <> 'faturado'::text) OR (forma_pagamento_id IS NOT NULL))),
+    CONSTRAINT chk_pdv_vendas_origem CHECK (((origem)::text = ANY ((ARRAY['rapida'::character varying, 'fluxo'::character varying])::text[]))),
+    CONSTRAINT chk_pdv_vendas_status CHECK (((status)::text = ANY ((ARRAY['pendente'::character varying, 'em_processo'::character varying, 'concluido'::character varying, 'faturado'::character varying, 'cancelado'::character varying])::text[]))),
+    CONSTRAINT chk_pdv_vendas_valor CHECK ((valor_total >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE pdv_vendas; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pdv_vendas IS 'Vendas efetivadas no PDV. Substitui uso direto de pedidos para venda rapida.';
+
+
+--
+-- Name: COLUMN pdv_vendas.origem; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pdv_vendas.origem IS 'rapida = modo terminal; fluxo = fluxo completo (nao implementado).';
+
+
+--
+-- Name: COLUMN pdv_vendas.protegido; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pdv_vendas.protegido IS 'TRUE: nao pode ser excluida, apenas cancelada (status=cancelado).';
+
+
+--
+-- Name: pdv_vendas_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.pdv_vendas_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pdv_vendas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pdv_vendas_id_seq OWNED BY public.pdv_vendas.id;
+
+
+--
+-- Name: pdv_vendas_numero_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.pdv_vendas_numero_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: pdv_vendas_numero_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pdv_vendas_numero_seq OWNED BY public.pdv_vendas.numero;
+
+
+--
+-- Name: pedido_itens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pedido_itens (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    pedido_id uuid NOT NULL,
+    produto_id integer,
+    nome_produto character varying(255) NOT NULL,
+    quantidade numeric(15,4) NOT NULL,
+    valor_unitario numeric(15,4) NOT NULL,
+    valor_total_item numeric(15,4) NOT NULL,
+    observacoes text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_pedido_itens_quantidade CHECK ((quantidade > (0)::numeric)),
+    CONSTRAINT chk_pedido_itens_valor_total_item CHECK ((valor_total_item >= (0)::numeric)),
+    CONSTRAINT chk_pedido_itens_valor_unitario CHECK ((valor_unitario >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE pedido_itens; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pedido_itens IS 'LEGADO HISTORICO. Itens dos pedidos descontinuados.';
+
+
+--
+-- Name: COLUMN pedido_itens.nome_produto; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pedido_itens.nome_produto IS 'Snapshot do nome do produto no momento do pedido.';
+
+
+--
+-- Name: pedido_nfe; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.pedido_nfe (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    pedido_id uuid NOT NULL,
+    numero_nfe bigint NOT NULL,
+    chave_acesso character varying(44) NOT NULL,
+    status character varying(20) DEFAULT 'PENDENTE'::character varying NOT NULL,
+    data_emissao timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    xml_nfe text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    n_prot character varying(15),
+    CONSTRAINT chk_pedido_nfe_chave_acesso CHECK ((char_length((chave_acesso)::text) = 44)),
+    CONSTRAINT chk_pedido_nfe_numero CHECK ((numero_nfe > 0)),
+    CONSTRAINT chk_pedido_nfe_status CHECK (((status)::text = ANY ((ARRAY['PENDENTE'::character varying, 'EMITIDA'::character varying, 'AUTORIZADA'::character varying, 'CANCELADA'::character varying, 'REJEITADA'::character varying, 'INUTILIZADA'::character varying])::text[]))),
+    CONSTRAINT chk_pedido_nfe_xml CHECK (((xml_nfe IS NULL) OR (length(xml_nfe) > 0)))
+);
+
+
+--
+-- Name: COLUMN pedido_nfe.n_prot; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.pedido_nfe.n_prot IS 'Numero do protocolo de autorizacao SEFAZ.
 Necessario para cancelamento dentro de 24h.';
 
--- ============================================================
--- MODULO: FISCAL DE SERVICOS (NFS-e)
--- ============================================================
 
-ALTER TABLE pedido_nfe
-    ADD COLUMN IF NOT EXISTS servico_id UUID REFERENCES servicos(id) ON DELETE SET NULL;
+--
+-- Name: pedidos; Type: TABLE; Schema: public; Owner: -
+--
 
-COMMENT ON COLUMN pedido_nfe.servico_id IS
-'Vinculo opcional com servico faturado quando a NF-e de produto for originada do modulo de servicos.';
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-          FROM pg_constraint
-         WHERE conname = 'chk_pedido_nfe_origem_unica'
-           AND conrelid = 'pedido_nfe'::regclass
-    ) THEN
-        ALTER TABLE pedido_nfe
-            ADD CONSTRAINT chk_pedido_nfe_origem_unica
-            CHECK (num_nonnulls(pedido_id, servico_id) = 1);
-    END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_pedido_nfe_servico_id
-    ON pedido_nfe(servico_id)
-    WHERE servico_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_pedido_nfe_pedido_id
-    ON pedido_nfe(pedido_id)
-    WHERE pedido_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_pedido_nfe_servico_id
-    ON pedido_nfe(servico_id)
-    WHERE servico_id IS NOT NULL;
+CREATE TABLE public.pedidos (
+    id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    numero bigint NOT NULL,
+    cliente_id integer,
+    usuario_id integer,
+    data_pedido timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    status character varying(20) DEFAULT 'PENDENTE'::character varying NOT NULL,
+    valor_total numeric(15,4) DEFAULT 0 NOT NULL,
+    desconto_tipo character varying(20),
+    desconto_valor numeric(15,2) DEFAULT 0 NOT NULL,
+    observacoes text,
+    data_faturamento timestamp with time zone,
+    data_entrega_prevista date,
+    data_entrega_realizada date,
+    ativo boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    nfe_emitida boolean DEFAULT false NOT NULL,
+    CONSTRAINT chk_pedidos_desconto_tipo CHECK (((desconto_tipo IS NULL) OR ((desconto_tipo)::text = ANY ((ARRAY['VALOR'::character varying, 'PERCENTUAL'::character varying])::text[])))),
+    CONSTRAINT chk_pedidos_desconto_valor CHECK ((desconto_valor >= (0)::numeric)),
+    CONSTRAINT chk_pedidos_status CHECK (((status)::text = ANY ((ARRAY['RASCUNHO'::character varying, 'PENDENTE'::character varying, 'EM_PROCESSO'::character varying, 'APROVADO'::character varying, 'FATURADO'::character varying, 'CANCELADO'::character varying, 'CONCLUIDO'::character varying])::text[]))),
+    CONSTRAINT chk_pedidos_valor_total CHECK ((valor_total >= (0)::numeric))
+);
 
 
+--
+-- Name: TABLE pedidos; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.pedidos IS 'LEGADO HISTORICO. Gestao_Pedidos removido em 2026-04-18. Vendas novas em pdv_vendas.';
 
 
-COMMENT ON TABLE nota_fiscal_servico IS 'Notas fiscais de servico geradas a partir de servicos faturados.';
-COMMENT ON COLUMN nota_fiscal_servico.servico_id IS 'Servico faturado que originou a NFS-e.';
-COMMENT ON COLUMN nota_fiscal_servico.numero_rps IS 'Sequencial do RPS usado antes da autorizacao municipal.';
+--
+-- Name: COLUMN pedidos.status; Type: COMMENT; Schema: public; Owner: -
+--
 
-CREATE INDEX IF NOT EXISTS idx_nota_fiscal_servico_servico_id
-    ON nota_fiscal_servico(servico_id);
+COMMENT ON COLUMN public.pedidos.status IS 'Ciclo de vida: RASCUNHO, PENDENTE, EM_PROCESSO, APROVADO, FATURADO, CANCELADO, CONCLUIDO.
+Kanban visual usa 4 colunas: PENDENTE (agrupa RASCUNHO+PENDENTE), EM_PROCESSO (agrupa EM_PROCESSO+APROVADO), 
+CONCLUIDO, FATURADO (read-only). Transicoes via drag-drop validadas em PedidoService::atualizarStatusKanban().';
 
-CREATE INDEX IF NOT EXISTS idx_nota_fiscal_servico_status
-    ON nota_fiscal_servico(status);
 
-CREATE INDEX IF NOT EXISTS idx_nota_fiscal_servico_numero_rps
-    ON nota_fiscal_servico(numero_rps);
+--
+-- Name: COLUMN pedidos.ativo; Type: COMMENT; Schema: public; Owner: -
+--
 
-CREATE INDEX IF NOT EXISTS idx_nota_fiscal_servico_data_emissao
-    ON nota_fiscal_servico(data_emissao);
+COMMENT ON COLUMN public.pedidos.ativo IS 'Soft delete logico do pedido.';
 
-INSERT INTO modulos (slug, nome, icone, ordem)
-VALUES ('fiscal', 'Fiscal', 'fa-file-invoice-dollar', 9)
-ON CONFLICT (slug) DO NOTHING;
 
-INSERT INTO modulos (slug, nome, icone, ordem)
-VALUES ('servicos', 'Servicos', 'fa-tools', 8)
-ON CONFLICT (slug) DO NOTHING;
+--
+-- Name: pedidos_numero_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
 
-INSERT INTO permissoes_nivel (nivel_acesso_id, modulo_id)
-SELECT 1, id
-FROM modulos
-WHERE slug = 'fiscal'
-ON CONFLICT DO NOTHING;
+CREATE SEQUENCE public.pedidos_numero_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
 
-INSERT INTO permissoes_nivel (nivel_acesso_id, modulo_id)
-SELECT 1, id
-FROM modulos
-WHERE slug = 'servicos'
-ON CONFLICT DO NOTHING;
 
-CREATE OR REPLACE VIEW vw_produtos_sem_fiscal AS
-SELECT
-    p.id,
+--
+-- Name: pedidos_numero_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.pedidos_numero_seq OWNED BY public.pedidos.numero;
+
+
+--
+-- Name: permissoes_nivel; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.permissoes_nivel (
+    nivel_acesso_id integer NOT NULL,
+    modulo_id integer NOT NULL
+);
+
+
+--
+-- Name: permissoes_personalizadas; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.permissoes_personalizadas (
+    usuario_id integer NOT NULL,
+    pode_operar_pdv boolean DEFAULT false NOT NULL,
+    pode_conferir_caixa boolean DEFAULT false NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: permissoes_usuario; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.permissoes_usuario (
+    usuario_id integer NOT NULL,
+    modulo_id integer NOT NULL
+);
+
+
+--
+-- Name: produto_estoque_movimentacoes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.produto_estoque_movimentacoes (
+    id bigint NOT NULL,
+    produto_id integer NOT NULL,
+    usuario_id integer,
+    tipo character varying(20) NOT NULL,
+    origem character varying(30) DEFAULT 'MANUAL'::character varying NOT NULL,
+    referencia_tipo character varying(30),
+    referencia_id character varying(64),
+    quantidade numeric(15,4) NOT NULL,
+    estoque_anterior numeric(15,4) NOT NULL,
+    estoque_posterior numeric(15,4) NOT NULL,
+    observacao text,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_produto_estoque_mov_qtd CHECK ((quantidade > (0)::numeric)),
+    CONSTRAINT chk_produto_estoque_mov_saldo CHECK (((estoque_anterior >= (0)::numeric) AND (estoque_posterior >= (0)::numeric))),
+    CONSTRAINT chk_produto_estoque_mov_tipo CHECK (((tipo)::text = ANY ((ARRAY['ENTRADA'::character varying, 'SAIDA'::character varying])::text[])))
+);
+
+
+--
+-- Name: produto_estoque_movimentacoes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.produto_estoque_movimentacoes_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: produto_estoque_movimentacoes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.produto_estoque_movimentacoes_id_seq OWNED BY public.produto_estoque_movimentacoes.id;
+
+
+--
+-- Name: produto_fiscal; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.produto_fiscal (
+    id integer NOT NULL,
+    produto_id integer NOT NULL,
+    ncm character varying(8) NOT NULL,
+    cest character varying(7),
+    cfop character varying(4) NOT NULL,
+    origem character(1) DEFAULT '0'::bpchar NOT NULL,
+    csosn_cst character varying(3),
+    aliquota_icms numeric(8,4) DEFAULT 0 NOT NULL,
+    aliquota_ipi numeric(8,4) DEFAULT 0 NOT NULL,
+    aliquota_pis numeric(8,4) DEFAULT 0 NOT NULL,
+    aliquota_cofins numeric(8,4) DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    cst_pis character varying(2),
+    cst_cofins character varying(2),
+    modalidade_bc_icms character(1),
+    aliquota_icms_st numeric(8,4) DEFAULT 0,
+    reducao_bc_icms numeric(8,4) DEFAULT 0,
+    codigo_beneficio_fiscal character varying(10),
+    ind_escala character(1) DEFAULT 'S'::bpchar,
+    cnpj_fabricante character varying(18),
+    CONSTRAINT chk_pf_aliq_cofins CHECK (((aliquota_cofins >= (0)::numeric) AND (aliquota_cofins <= (100)::numeric))),
+    CONSTRAINT chk_pf_aliq_icms CHECK (((aliquota_icms >= (0)::numeric) AND (aliquota_icms <= (100)::numeric))),
+    CONSTRAINT chk_pf_aliq_ipi CHECK (((aliquota_ipi >= (0)::numeric) AND (aliquota_ipi <= (100)::numeric))),
+    CONSTRAINT chk_pf_aliq_pis CHECK (((aliquota_pis >= (0)::numeric) AND (aliquota_pis <= (100)::numeric))),
+    CONSTRAINT chk_pf_cest_len CHECK (((cest IS NULL) OR (char_length((cest)::text) = 7))),
+    CONSTRAINT chk_pf_cfop_len CHECK ((char_length((cfop)::text) = 4)),
+    CONSTRAINT chk_pf_ncm_len CHECK ((char_length((ncm)::text) = 8)),
+    CONSTRAINT chk_pf_origem CHECK ((origem = ANY (ARRAY['0'::bpchar, '1'::bpchar, '2'::bpchar, '3'::bpchar, '4'::bpchar, '5'::bpchar, '6'::bpchar, '7'::bpchar, '8'::bpchar]))),
+    CONSTRAINT produto_fiscal_ind_escala_check CHECK ((ind_escala = ANY (ARRAY['S'::bpchar, 'N'::bpchar]))),
+    CONSTRAINT produto_fiscal_modalidade_bc_icms_check CHECK ((modalidade_bc_icms = ANY (ARRAY['0'::bpchar, '1'::bpchar, '2'::bpchar, '3'::bpchar])))
+);
+
+
+--
+-- Name: TABLE produto_fiscal; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.produto_fiscal IS '1 produto para 0..1 registro fiscal. Separado para NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.cst_pis; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.cst_pis IS 'Codigo CST do PIS usado na composicao dos tributos da NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.cst_cofins; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.cst_cofins IS 'Codigo CST do COFINS usado na composicao dos tributos da NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.modalidade_bc_icms; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.modalidade_bc_icms IS 'Modalidade de determinacao da base de calculo do ICMS na NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.aliquota_icms_st; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.aliquota_icms_st IS 'Aliquota de ICMS ST informada na NF-e quando houver substituicao tributaria.';
+
+
+--
+-- Name: COLUMN produto_fiscal.reducao_bc_icms; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.reducao_bc_icms IS 'Percentual de reducao da base de calculo do ICMS destacado na NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.codigo_beneficio_fiscal; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.codigo_beneficio_fiscal IS 'Codigo de beneficio fiscal vinculado ao item para emissao da NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.ind_escala; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.ind_escala IS 'Indicador de relevancia em escala industrial do fabricante para a NF-e.';
+
+
+--
+-- Name: COLUMN produto_fiscal.cnpj_fabricante; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.produto_fiscal.cnpj_fabricante IS 'CNPJ do fabricante exigido na NF-e quando aplicavel ao item.';
+
+
+--
+-- Name: produto_fiscal_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.produto_fiscal_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: produto_fiscal_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.produto_fiscal_id_seq OWNED BY public.produto_fiscal.id;
+
+
+--
+-- Name: produtos; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.produtos (
+    id integer NOT NULL,
+    uuid uuid DEFAULT public.uuid_generate_v4(),
+    codigo character varying(50),
+    nome character varying(255) NOT NULL,
+    descricao text,
+    unidade character varying(10) DEFAULT 'UN'::character varying NOT NULL,
+    preco_custo numeric(15,4) DEFAULT 0 NOT NULL,
+    preco_venda numeric(15,4) DEFAULT 0 NOT NULL,
+    estoque_atual numeric(15,4) DEFAULT 0 NOT NULL,
+    estoque_minimo numeric(15,4) DEFAULT 0 NOT NULL,
+    ativo boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_produtos_estoque CHECK ((estoque_atual >= (0)::numeric)),
+    CONSTRAINT chk_produtos_preco_custo CHECK ((preco_custo >= (0)::numeric)),
+    CONSTRAINT chk_produtos_preco_venda CHECK ((preco_venda >= (0)::numeric)),
+    CONSTRAINT chk_produtos_unidade CHECK (((unidade)::text = ANY ((ARRAY['UN'::character varying, 'KG'::character varying, 'L'::character varying, 'M'::character varying, 'CX'::character varying, 'PC'::character varying, 'MT'::character varying, 'M2'::character varying, 'M3'::character varying, 'PR'::character varying])::text[])))
+);
+
+
+--
+-- Name: TABLE produtos; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.produtos IS 'Catalogo de produtos. Dados fiscais em produto_fiscal (0..1).';
+
+
+--
+-- Name: produtos_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.produtos_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: produtos_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.produtos_id_seq OWNED BY public.produtos.id;
+
+
+--
+-- Name: schema_migrations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.schema_migrations (
+    version character varying(255) NOT NULL,
+    checksum character(40) NOT NULL,
+    executed_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: servicos_catalogo; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.servicos_catalogo (
+    id integer NOT NULL,
+    nome character varying(255) NOT NULL,
+    descricao text,
+    valor_base numeric(15,4) DEFAULT 0 NOT NULL,
+    ativo boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    CONSTRAINT chk_servicos_catalogo_valor_base CHECK ((valor_base >= (0)::numeric))
+);
+
+
+--
+-- Name: TABLE servicos_catalogo; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.servicos_catalogo IS 'Cadastro mestre dos servicos oferecidos pela empresa (mini-modulo).';
+
+
+--
+-- Name: servicos_catalogo_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.servicos_catalogo_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: servicos_catalogo_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.servicos_catalogo_id_seq OWNED BY public.servicos_catalogo.id;
+
+
+--
+-- Name: usuarios; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.usuarios (
+    id integer NOT NULL,
+    uuid uuid DEFAULT public.uuid_generate_v4(),
+    nome character varying(100) NOT NULL,
+    email character varying(100) NOT NULL,
+    senha character varying(255) NOT NULL,
+    telefone character varying(20),
+    nivel_acesso_id integer DEFAULT 4 NOT NULL,
+    ativo boolean DEFAULT true,
+    foto_perfil character varying(255),
+    ultimo_acesso timestamp with time zone,
+    token_reset_senha character varying(255),
+    token_expiracao timestamp with time zone,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: usuarios_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.usuarios_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: usuarios_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.usuarios_id_seq OWNED BY public.usuarios.id;
+
+
+--
+-- Name: vw_dre; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.vw_dre AS
+ SELECT cd.id AS categoria_id,
+    cd.nome AS categoria,
+    cd.tipo,
+    cd.ordem,
+    COALESCE(cr.total, (0)::numeric) AS total_receber,
+    COALESCE(cp.total, (0)::numeric) AS total_pagar,
+    COALESCE(mov.total_entrada, (0)::numeric) AS total_mov_entrada,
+    COALESCE(mov.total_saida, (0)::numeric) AS total_mov_saida
+   FROM (((public.categorias_dre cd
+     LEFT JOIN ( SELECT contas_receber.categoria_dre_id,
+            sum(contas_receber.valor_pago) AS total
+           FROM public.contas_receber
+          WHERE ((contas_receber.status)::text = 'PAGO'::text)
+          GROUP BY contas_receber.categoria_dre_id) cr ON ((cr.categoria_dre_id = cd.id)))
+     LEFT JOIN ( SELECT contas_pagar.categoria_dre_id,
+            sum(contas_pagar.valor_pago) AS total
+           FROM public.contas_pagar
+          WHERE ((contas_pagar.status)::text = 'PAGO'::text)
+          GROUP BY contas_pagar.categoria_dre_id) cp ON ((cp.categoria_dre_id = cd.id)))
+     LEFT JOIN ( SELECT movimentacoes.categoria_dre_id,
+            sum(
+                CASE
+                    WHEN ((movimentacoes.tipo)::text = 'Entrada'::text) THEN movimentacoes.valor
+                    ELSE (0)::numeric
+                END) AS total_entrada,
+            sum(
+                CASE
+                    WHEN ((movimentacoes.tipo)::text = 'Saída'::text) THEN movimentacoes.valor
+                    ELSE (0)::numeric
+                END) AS total_saida
+           FROM public.movimentacoes
+          WHERE (movimentacoes.afeta_saldo = true)
+          GROUP BY movimentacoes.categoria_dre_id) mov ON ((mov.categoria_dre_id = cd.id)))
+  WHERE (cd.ativo = true)
+  ORDER BY cd.ordem;
+
+
+--
+-- Name: VIEW vw_dre; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON VIEW public.vw_dre IS 'Visao agregada de categorias DRE x totais pagos/recebidos/movimentados (sem filtro de periodo).';
+
+
+--
+-- Name: vw_permissoes_usuario; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.vw_permissoes_usuario AS
+ SELECT u.id AS usuario_id,
+    u.nivel_acesso_id,
+    m.slug AS modulo_slug
+   FROM ((public.usuarios u
+     JOIN public.permissoes_nivel pn ON ((pn.nivel_acesso_id = u.nivel_acesso_id)))
+     JOIN public.modulos m ON ((m.id = pn.modulo_id)))
+  WHERE (u.nivel_acesso_id <> 4)
+UNION ALL
+ SELECT u.id AS usuario_id,
+    u.nivel_acesso_id,
+    m.slug AS modulo_slug
+   FROM ((public.usuarios u
+     JOIN public.permissoes_usuario pu ON ((pu.usuario_id = u.id)))
+     JOIN public.modulos m ON ((m.id = pu.modulo_id)))
+  WHERE (u.nivel_acesso_id = 4);
+
+
+--
+-- Name: vw_produtos_sem_fiscal; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.vw_produtos_sem_fiscal AS
+ SELECT p.id,
     p.codigo,
     p.nome,
     p.ativo,
-    CASE
-        WHEN pf.id IS NULL THEN 'SEM_REGISTRO'
-        ELSE 'COM_REGISTRO'
-    END AS tem_fiscal,
-    (
-        pf.ncm IS NOT NULL
-        AND pf.cfop IS NOT NULL
-        AND pf.csosn_cst IS NOT NULL
-        AND pf.cst_pis IS NOT NULL
-        AND pf.cst_cofins IS NOT NULL
-        AND pf.modalidade_bc_icms IS NOT NULL
-    ) AS fiscal_completo_nfe
-FROM produtos p
-LEFT JOIN produto_fiscal pf ON pf.produto_id = p.id
-WHERE p.ativo = TRUE
-ORDER BY fiscal_completo_nfe ASC, p.nome;
+        CASE
+            WHEN (pf.id IS NULL) THEN 'SEM_REGISTRO'::text
+            ELSE 'COM_REGISTRO'::text
+        END AS tem_fiscal,
+    ((pf.ncm IS NOT NULL) AND (pf.cfop IS NOT NULL) AND (pf.csosn_cst IS NOT NULL) AND (pf.cst_pis IS NOT NULL) AND (pf.cst_cofins IS NOT NULL) AND (pf.modalidade_bc_icms IS NOT NULL)) AS fiscal_completo_nfe
+   FROM (public.produtos p
+     LEFT JOIN public.produto_fiscal pf ON ((pf.produto_id = p.id)))
+  WHERE (p.ativo = true)
+  ORDER BY ((pf.ncm IS NOT NULL) AND (pf.cfop IS NOT NULL) AND (pf.csosn_cst IS NOT NULL) AND (pf.cst_pis IS NOT NULL) AND (pf.cst_cofins IS NOT NULL) AND (pf.modalidade_bc_icms IS NOT NULL)), p.nome;
 
+
+--
+-- Name: vw_status_plano; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.vw_status_plano AS
+ SELECT l.plano_slug,
+    l.max_usuarios,
+    l.status AS licenca_status,
+    l.licenca_fim,
+    GREATEST(0, (l.licenca_fim - CURRENT_DATE)) AS dias_restantes,
+    u.total_ativos AS total_usuarios_ativos,
+    u.total_ativos,
+        CASE
+            WHEN (l.max_usuarios IS NULL) THEN true
+            WHEN (u.total_ativos < l.max_usuarios) THEN true
+            ELSE false
+        END AS pode_criar_usuario,
+        CASE
+            WHEN (l.max_usuarios IS NULL) THEN true
+            WHEN (u.total_ativos < l.max_usuarios) THEN true
+            ELSE false
+        END AS pode_criar
+   FROM (public.licenca l
+     CROSS JOIN LATERAL ( SELECT count(*) AS total_ativos
+           FROM public.usuarios
+          WHERE ((usuarios.ativo = true) AND (NOT ((lower((usuarios.email)::text) = lower('admin@suporte.com'::text)) AND (usuarios.nivel_acesso_id = 1))))) u)
+ LIMIT 1;
+
+
+--
+-- Name: auditoria id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auditoria ALTER COLUMN id SET DEFAULT nextval('public.auditoria_id_seq'::regclass);
+
+
+--
+-- Name: auditoria_usuarios id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auditoria_usuarios ALTER COLUMN id SET DEFAULT nextval('public.auditoria_usuarios_id_seq'::regclass);
+
+
+--
+-- Name: categorias_dre id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categorias_dre ALTER COLUMN id SET DEFAULT nextval('public.categorias_dre_id_seq'::regclass);
+
+
+--
+-- Name: clientes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clientes ALTER COLUMN id SET DEFAULT nextval('public.clientes_id_seq'::regclass);
+
+
+--
+-- Name: configuracoes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.configuracoes ALTER COLUMN id SET DEFAULT nextval('public.configuracoes_id_seq'::regclass);
+
+
+--
+-- Name: contas id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas ALTER COLUMN id SET DEFAULT nextval('public.contas_id_seq'::regclass);
+
+
+--
+-- Name: contas_pagar id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_pagar ALTER COLUMN id SET DEFAULT nextval('public.contas_pagar_id_seq'::regclass);
+
+
+--
+-- Name: contas_receber id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_receber ALTER COLUMN id SET DEFAULT nextval('public.contas_receber_id_seq'::regclass);
+
+
+--
+-- Name: empresa_fiscal_servico id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_fiscal_servico ALTER COLUMN id SET DEFAULT nextval('public.empresa_fiscal_servico_id_seq'::regclass);
+
+
+--
+-- Name: empresa_local id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_local ALTER COLUMN id SET DEFAULT nextval('public.empresa_local_id_seq'::regclass);
+
+
+--
+-- Name: formas_pagamento id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.formas_pagamento ALTER COLUMN id SET DEFAULT nextval('public.formas_pagamento_id_seq'::regclass);
+
+
+--
+-- Name: licenca id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.licenca ALTER COLUMN id SET DEFAULT nextval('public.licenca_id_seq'::regclass);
+
+
+--
+-- Name: modulos id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.modulos ALTER COLUMN id SET DEFAULT nextval('public.modulos_id_seq'::regclass);
+
+
+--
+-- Name: movimentacoes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes ALTER COLUMN id SET DEFAULT nextval('public.movimentacoes_id_seq'::regclass);
+
+
+--
+-- Name: niveis_acesso id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.niveis_acesso ALTER COLUMN id SET DEFAULT nextval('public.niveis_acesso_id_seq'::regclass);
+
+
+--
+-- Name: nota_fiscal_servico id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.nota_fiscal_servico ALTER COLUMN id SET DEFAULT nextval('public.nota_fiscal_servico_id_seq'::regclass);
+
+
+--
+-- Name: notificacoes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notificacoes ALTER COLUMN id SET DEFAULT nextval('public.notificacoes_id_seq'::regclass);
+
+
+--
+-- Name: pdv_caixas id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_caixas ALTER COLUMN id SET DEFAULT nextval('public.pdv_caixas_id_seq'::regclass);
+
+
+--
+-- Name: pdv_conferencia_itens id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_conferencia_itens ALTER COLUMN id SET DEFAULT nextval('public.pdv_conferencia_itens_id_seq'::regclass);
+
+
+--
+-- Name: pdv_lancamentos id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_lancamentos ALTER COLUMN id SET DEFAULT nextval('public.pdv_lancamentos_id_seq'::regclass);
+
+
+--
+-- Name: pdv_venda_itens id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_venda_itens ALTER COLUMN id SET DEFAULT nextval('public.pdv_venda_itens_id_seq'::regclass);
+
+
+--
+-- Name: pdv_vendas id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas ALTER COLUMN id SET DEFAULT nextval('public.pdv_vendas_id_seq'::regclass);
+
+
+--
+-- Name: pdv_vendas numero; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas ALTER COLUMN numero SET DEFAULT nextval('public.pdv_vendas_numero_seq'::regclass);
+
+
+--
+-- Name: pedidos numero; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedidos ALTER COLUMN numero SET DEFAULT nextval('public.pedidos_numero_seq'::regclass);
+
+
+--
+-- Name: produto_estoque_movimentacoes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_estoque_movimentacoes ALTER COLUMN id SET DEFAULT nextval('public.produto_estoque_movimentacoes_id_seq'::regclass);
+
+
+--
+-- Name: produto_fiscal id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_fiscal ALTER COLUMN id SET DEFAULT nextval('public.produto_fiscal_id_seq'::regclass);
+
+
+--
+-- Name: produtos id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produtos ALTER COLUMN id SET DEFAULT nextval('public.produtos_id_seq'::regclass);
+
+
+--
+-- Name: servicos_catalogo id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.servicos_catalogo ALTER COLUMN id SET DEFAULT nextval('public.servicos_catalogo_id_seq'::regclass);
+
+
+--
+-- Name: usuarios id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.usuarios ALTER COLUMN id SET DEFAULT nextval('public.usuarios_id_seq'::regclass);
+
+
+--
+-- Name: auditoria auditoria_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auditoria
+    ADD CONSTRAINT auditoria_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: auditoria_usuarios auditoria_usuarios_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auditoria_usuarios
+    ADD CONSTRAINT auditoria_usuarios_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: categorias_dre categorias_dre_nome_unique; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categorias_dre
+    ADD CONSTRAINT categorias_dre_nome_unique UNIQUE (nome);
+
+
+--
+-- Name: categorias_dre categorias_dre_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.categorias_dre
+    ADD CONSTRAINT categorias_dre_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: clientes clientes_cpf_cnpj_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clientes
+    ADD CONSTRAINT clientes_cpf_cnpj_key UNIQUE (cpf_cnpj);
+
+
+--
+-- Name: clientes clientes_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clientes
+    ADD CONSTRAINT clientes_email_key UNIQUE (email);
+
+
+--
+-- Name: clientes clientes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clientes
+    ADD CONSTRAINT clientes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: configuracoes configuracoes_chave_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.configuracoes
+    ADD CONSTRAINT configuracoes_chave_key UNIQUE (chave);
+
+
+--
+-- Name: configuracoes configuracoes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.configuracoes
+    ADD CONSTRAINT configuracoes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contas_pagar contas_pagar_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_pagar
+    ADD CONSTRAINT contas_pagar_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contas contas_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas
+    ADD CONSTRAINT contas_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contas_receber contas_receber_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_receber
+    ADD CONSTRAINT contas_receber_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: empresa_fiscal_servico empresa_fiscal_servico_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_fiscal_servico
+    ADD CONSTRAINT empresa_fiscal_servico_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: empresa_local empresa_local_cnpj_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_local
+    ADD CONSTRAINT empresa_local_cnpj_key UNIQUE (cnpj);
+
+
+--
+-- Name: empresa_local empresa_local_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.empresa_local
+    ADD CONSTRAINT empresa_local_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: formas_pagamento formas_pagamento_nome_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.formas_pagamento
+    ADD CONSTRAINT formas_pagamento_nome_key UNIQUE (nome);
+
+
+--
+-- Name: formas_pagamento formas_pagamento_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.formas_pagamento
+    ADD CONSTRAINT formas_pagamento_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: licenca licenca_chave_licenca_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.licenca
+    ADD CONSTRAINT licenca_chave_licenca_key UNIQUE (chave_licenca);
+
+
+--
+-- Name: licenca licenca_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.licenca
+    ADD CONSTRAINT licenca_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: modulos modulos_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.modulos
+    ADD CONSTRAINT modulos_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: modulos modulos_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.modulos
+    ADD CONSTRAINT modulos_slug_key UNIQUE (slug);
+
+
+--
+-- Name: movimentacoes movimentacoes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes
+    ADD CONSTRAINT movimentacoes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: niveis_acesso niveis_acesso_nome_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.niveis_acesso
+    ADD CONSTRAINT niveis_acesso_nome_key UNIQUE (nome);
+
+
+--
+-- Name: niveis_acesso niveis_acesso_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.niveis_acesso
+    ADD CONSTRAINT niveis_acesso_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: nota_fiscal_servico nota_fiscal_servico_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.nota_fiscal_servico
+    ADD CONSTRAINT nota_fiscal_servico_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: notificacoes notificacoes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notificacoes
+    ADD CONSTRAINT notificacoes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pdv_caixas pdv_caixas_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_caixas
+    ADD CONSTRAINT pdv_caixas_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pdv_conferencia_itens pdv_conferencia_itens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_conferencia_itens
+    ADD CONSTRAINT pdv_conferencia_itens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pdv_lancamentos pdv_lancamentos_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_lancamentos
+    ADD CONSTRAINT pdv_lancamentos_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pdv_venda_itens pdv_venda_itens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_venda_itens
+    ADD CONSTRAINT pdv_venda_itens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pdv_vendas pdv_vendas_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_numero_key UNIQUE (numero);
+
+
+--
+-- Name: pdv_vendas pdv_vendas_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pedido_itens pedido_itens_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedido_itens
+    ADD CONSTRAINT pedido_itens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pedido_nfe pedido_nfe_chave_acesso_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedido_nfe
+    ADD CONSTRAINT pedido_nfe_chave_acesso_key UNIQUE (chave_acesso);
+
+
+--
+-- Name: pedido_nfe pedido_nfe_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedido_nfe
+    ADD CONSTRAINT pedido_nfe_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pedidos pedidos_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedidos
+    ADD CONSTRAINT pedidos_numero_key UNIQUE (numero);
+
+
+--
+-- Name: pedidos pedidos_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedidos
+    ADD CONSTRAINT pedidos_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: permissoes_nivel permissoes_nivel_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_nivel
+    ADD CONSTRAINT permissoes_nivel_pkey PRIMARY KEY (nivel_acesso_id, modulo_id);
+
+
+--
+-- Name: permissoes_personalizadas permissoes_personalizadas_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_personalizadas
+    ADD CONSTRAINT permissoes_personalizadas_pkey PRIMARY KEY (usuario_id);
+
+
+--
+-- Name: permissoes_usuario permissoes_usuario_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_usuario
+    ADD CONSTRAINT permissoes_usuario_pkey PRIMARY KEY (usuario_id, modulo_id);
+
+
+--
+-- Name: produto_estoque_movimentacoes produto_estoque_movimentacoes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_estoque_movimentacoes
+    ADD CONSTRAINT produto_estoque_movimentacoes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: produto_fiscal produto_fiscal_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_fiscal
+    ADD CONSTRAINT produto_fiscal_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: produtos produtos_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produtos
+    ADD CONSTRAINT produtos_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: produtos produtos_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produtos
+    ADD CONSTRAINT produtos_uuid_key UNIQUE (uuid);
+
+
+--
+-- Name: schema_migrations schema_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.schema_migrations
+    ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (version);
+
+
+--
+-- Name: servicos_catalogo servicos_catalogo_nome_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.servicos_catalogo
+    ADD CONSTRAINT servicos_catalogo_nome_key UNIQUE (nome);
+
+
+--
+-- Name: servicos_catalogo servicos_catalogo_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.servicos_catalogo
+    ADD CONSTRAINT servicos_catalogo_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: pdv_conferencia_itens uq_pdv_conferencia_caixa_forma; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_conferencia_itens
+    ADD CONSTRAINT uq_pdv_conferencia_caixa_forma UNIQUE (caixa_id, forma_pagamento_id);
+
+
+--
+-- Name: produto_fiscal uq_produto_fiscal_produto; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_fiscal
+    ADD CONSTRAINT uq_produto_fiscal_produto UNIQUE (produto_id);
+
+
+--
+-- Name: usuarios usuarios_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.usuarios
+    ADD CONSTRAINT usuarios_email_key UNIQUE (email);
+
+
+--
+-- Name: usuarios usuarios_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.usuarios
+    ADD CONSTRAINT usuarios_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_auditoria_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auditoria_created_at ON public.auditoria USING btree (created_at DESC);
+
+
+--
+-- Name: idx_auditoria_modulo_acao; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auditoria_modulo_acao ON public.auditoria_usuarios USING btree (modulo, acao);
+
+
+--
+-- Name: idx_auditoria_tabela; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auditoria_tabela ON public.auditoria USING btree (tabela);
+
+
+--
+-- Name: idx_auditoria_usuario; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auditoria_usuario ON public.auditoria USING btree (usuario_id);
+
+
+--
+-- Name: idx_auditoria_usuario_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_auditoria_usuario_id ON public.auditoria_usuarios USING btree (usuario_id);
+
+
+--
+-- Name: idx_categorias_dre_ativo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_categorias_dre_ativo ON public.categorias_dre USING btree (ativo);
+
+
+--
+-- Name: idx_categorias_dre_tipo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_categorias_dre_tipo ON public.categorias_dre USING btree (tipo);
+
+
+--
+-- Name: idx_clientes_ativo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_clientes_ativo ON public.clientes USING btree (ativo);
+
+
+--
+-- Name: idx_clientes_cpf_cnpj; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_clientes_cpf_cnpj ON public.clientes USING btree (cpf_cnpj);
+
+
+--
+-- Name: idx_clientes_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_clientes_email ON public.clientes USING btree (email);
+
+
+--
+-- Name: idx_clientes_nome_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_clientes_nome_trgm ON public.clientes USING gin (nome public.gin_trgm_ops);
+
+
+--
+-- Name: INDEX idx_clientes_nome_trgm; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.idx_clientes_nome_trgm IS 'Indice GIN para busca ILIKE otimizada. Performance: 400ms para 40ms para 10.000 registros';
+
+
+--
+-- Name: idx_clientes_usuario; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_clientes_usuario ON public.clientes USING btree (usuario_id);
+
+
+--
+-- Name: idx_contas_ativo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_ativo ON public.contas USING btree (ativo);
+
+
+--
+-- Name: idx_contas_pagar_categoria; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_pagar_categoria ON public.contas_pagar USING btree (categoria_dre_id);
+
+
+--
+-- Name: idx_contas_pagar_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_pagar_status ON public.contas_pagar USING btree (status);
+
+
+--
+-- Name: idx_contas_pagar_vencimento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_pagar_vencimento ON public.contas_pagar USING btree (data_vencimento);
+
+
+--
+-- Name: idx_contas_receber_categoria; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_categoria ON public.contas_receber USING btree (categoria_dre_id);
+
+
+--
+-- Name: idx_contas_receber_cliente; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_cliente ON public.contas_receber USING btree (cliente_id);
+
+
+--
+-- Name: idx_contas_receber_forma_pagamento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_forma_pagamento ON public.contas_receber USING btree (forma_pagamento_id) WHERE (forma_pagamento_id IS NOT NULL);
+
+
+--
+-- Name: idx_contas_receber_origem; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_origem ON public.contas_receber USING btree (origem) WHERE (origem IS NOT NULL);
+
+
+--
+-- Name: idx_contas_receber_pdv_venda; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_pdv_venda ON public.contas_receber USING btree (pdv_venda_id) WHERE (pdv_venda_id IS NOT NULL);
+
+
+--
+-- Name: idx_contas_receber_pedido_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_pedido_id ON public.contas_receber USING btree (pedido_id) WHERE (pedido_id IS NOT NULL);
+
+
+--
+-- Name: idx_contas_receber_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_status ON public.contas_receber USING btree (status);
+
+
+--
+-- Name: idx_contas_receber_vencimento; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_receber_vencimento ON public.contas_receber USING btree (data_vencimento);
+
+
+--
+-- Name: idx_contas_tipo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contas_tipo ON public.contas USING btree (tipo);
+
+
+--
+-- Name: idx_formas_pagamento_adquirente; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_formas_pagamento_adquirente ON public.formas_pagamento USING btree (adquirente_id);
+
+
+--
+-- Name: idx_formas_pagamento_ativo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_formas_pagamento_ativo ON public.formas_pagamento USING btree (ativo);
+
+
+--
+-- Name: idx_formas_pagamento_conta; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_formas_pagamento_conta ON public.formas_pagamento USING btree (conta_id);
+
+
+--
+-- Name: idx_licenca_fim; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_licenca_fim ON public.licenca USING btree (licenca_fim);
+
+
+--
+-- Name: idx_licenca_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_licenca_status ON public.licenca USING btree (status);
+
+
+--
+-- Name: idx_movimentacoes_categoria; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_movimentacoes_categoria ON public.movimentacoes USING btree (categoria_dre_id);
+
+
+--
+-- Name: idx_movimentacoes_conta; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_movimentacoes_conta ON public.movimentacoes USING btree (conta_id);
+
+
+--
+-- Name: idx_movimentacoes_data; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_movimentacoes_data ON public.movimentacoes USING btree (data_movimentacao DESC);
+
+
+--
+-- Name: idx_movimentacoes_pedido; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_movimentacoes_pedido ON public.movimentacoes USING btree (pedido_id) WHERE (pedido_id IS NOT NULL);
+
+
+--
+-- Name: idx_movimentacoes_tipo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_movimentacoes_tipo ON public.movimentacoes USING btree (tipo);
+
+
+--
+-- Name: idx_nota_fiscal_servico_data_emissao; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_nota_fiscal_servico_data_emissao ON public.nota_fiscal_servico USING btree (data_emissao);
+
+
+--
+-- Name: idx_nota_fiscal_servico_numero_rps; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_nota_fiscal_servico_numero_rps ON public.nota_fiscal_servico USING btree (numero_rps);
+
+
+--
+-- Name: idx_nota_fiscal_servico_servico_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_nota_fiscal_servico_servico_id ON public.nota_fiscal_servico USING btree (servico_id);
+
+
+--
+-- Name: idx_nota_fiscal_servico_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_nota_fiscal_servico_status ON public.nota_fiscal_servico USING btree (status);
+
+
+--
+-- Name: idx_notificacoes_lida; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_notificacoes_lida ON public.notificacoes USING btree (lida);
+
+
+--
+-- Name: idx_notificacoes_usuario; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_notificacoes_usuario ON public.notificacoes USING btree (usuario_id);
+
+
+--
+-- Name: idx_pdv_caixas_data; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_caixas_data ON public.pdv_caixas USING btree (data_abertura);
+
+
+--
+-- Name: idx_pdv_caixas_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_caixas_status ON public.pdv_caixas USING btree (status);
+
+
+--
+-- Name: idx_pdv_caixas_usuario; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_caixas_usuario ON public.pdv_caixas USING btree (usuario_abertura_id);
+
+
+--
+-- Name: idx_pdv_conferencia_caixa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_conferencia_caixa ON public.pdv_conferencia_itens USING btree (caixa_id);
+
+
+--
+-- Name: idx_pdv_lancamentos_caixa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_lancamentos_caixa ON public.pdv_lancamentos USING btree (caixa_id);
+
+
+--
+-- Name: idx_pdv_lancamentos_pedido; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_lancamentos_pedido ON public.pdv_lancamentos USING btree (pedido_id);
+
+
+--
+-- Name: idx_pdv_venda_itens_venda; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_venda_itens_venda ON public.pdv_venda_itens USING btree (venda_id);
+
+
+--
+-- Name: idx_pdv_vendas_caixa; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_caixa ON public.pdv_vendas USING btree (caixa_id);
+
+
+--
+-- Name: idx_pdv_vendas_cancelado_por; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_cancelado_por ON public.pdv_vendas USING btree (cancelado_por_id) WHERE (cancelado_por_id IS NOT NULL);
+
+
+--
+-- Name: idx_pdv_vendas_conferida; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_conferida ON public.pdv_vendas USING btree (caixa_id, conferida) WHERE ((conferida = false) AND ((status)::text = 'faturado'::text));
+
+
+--
+-- Name: idx_pdv_vendas_data; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_data ON public.pdv_vendas USING btree (created_at DESC);
+
+
+--
+-- Name: idx_pdv_vendas_kanban; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_kanban ON public.pdv_vendas USING btree (caixa_id, status, created_at DESC) WHERE (((origem)::text = 'fluxo'::text) AND ((status)::text <> 'cancelado'::text));
+
+
+--
+-- Name: idx_pdv_vendas_numero; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_numero ON public.pdv_vendas USING btree (numero);
+
+
+--
+-- Name: idx_pdv_vendas_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pdv_vendas_status ON public.pdv_vendas USING btree (status);
+
+
+--
+-- Name: idx_pedido_itens_pedido_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedido_itens_pedido_id ON public.pedido_itens USING btree (pedido_id);
+
+
+--
+-- Name: idx_pedido_itens_produto_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedido_itens_produto_id ON public.pedido_itens USING btree (produto_id) WHERE (produto_id IS NOT NULL);
+
+
+--
+-- Name: idx_pedidos_cliente_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedidos_cliente_id ON public.pedidos USING btree (cliente_id) WHERE (ativo = true);
+
+
+--
+-- Name: INDEX idx_pedidos_cliente_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.idx_pedidos_cliente_id IS 'Indice parcial para JOINs com clientes. Ignora pedidos inativos para economizar espaco.';
+
+
+--
+-- Name: idx_pedidos_data_pedido; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedidos_data_pedido ON public.pedidos USING btree (data_pedido DESC);
+
+
+--
+-- Name: INDEX idx_pedidos_data_pedido; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.idx_pedidos_data_pedido IS 'Indice para ordenacao cronologica DESC (mais recente primeiro). Usado em listagens gerais.';
+
+
+--
+-- Name: idx_pedidos_kanban_principal; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedidos_kanban_principal ON public.pedidos USING btree (ativo, data_pedido DESC, status) WHERE (ativo = true);
+
+
+--
+-- Name: INDEX idx_pedidos_kanban_principal; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.idx_pedidos_kanban_principal IS 'Indice composto otimizado para view Kanban. Reduz tempo de query de 1.2s para 120ms (90% melhoria).
+Ordem dos campos: ativo (filtro WHERE), data_pedido DESC (ordenacao), status (agrupamento Kanban).';
+
+
+--
+-- Name: idx_pedidos_observacoes_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedidos_observacoes_trgm ON public.pedidos USING gin (observacoes public.gin_trgm_ops);
+
+
+--
+-- Name: INDEX idx_pedidos_observacoes_trgm; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.idx_pedidos_observacoes_trgm IS 'Indice GIN para busca ILIKE em observacoes. Performance: 800ms para 80ms para 10.000 registros.';
+
+
+--
+-- Name: idx_pedidos_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedidos_status ON public.pedidos USING btree (status) WHERE (ativo = true);
+
+
+--
+-- Name: INDEX idx_pedidos_status; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON INDEX public.idx_pedidos_status IS 'Indice parcial para filtros por status. Usado em queries da Lista de Pedidos.';
+
+
+--
+-- Name: idx_pedidos_usuario_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_pedidos_usuario_id ON public.pedidos USING btree (usuario_id) WHERE (usuario_id IS NOT NULL);
+
+
+--
+-- Name: idx_permissoes_personalizadas_conferir; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_permissoes_personalizadas_conferir ON public.permissoes_personalizadas USING btree (pode_conferir_caixa);
+
+
+--
+-- Name: idx_permissoes_personalizadas_operar; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_permissoes_personalizadas_operar ON public.permissoes_personalizadas USING btree (pode_operar_pdv);
+
+
+--
+-- Name: idx_prod_estoque_mov_produto_data; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_prod_estoque_mov_produto_data ON public.produto_estoque_movimentacoes USING btree (produto_id, created_at DESC);
+
+
+--
+-- Name: idx_prod_estoque_mov_tipo_data; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_prod_estoque_mov_tipo_data ON public.produto_estoque_movimentacoes USING btree (tipo, created_at DESC);
+
+
+--
+-- Name: idx_produto_fiscal_produto; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_produto_fiscal_produto ON public.produto_fiscal USING btree (produto_id);
+
+
+--
+-- Name: idx_produtos_ativo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_produtos_ativo ON public.produtos USING btree (ativo);
+
+
+--
+-- Name: idx_produtos_codigo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_produtos_codigo ON public.produtos USING btree (codigo);
+
+
+--
+-- Name: idx_usuarios_ativo; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_usuarios_ativo ON public.usuarios USING btree (ativo);
+
+
+--
+-- Name: idx_usuarios_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_usuarios_email ON public.usuarios USING btree (email);
+
+
+--
+-- Name: idx_usuarios_nivel_acesso; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_usuarios_nivel_acesso ON public.usuarios USING btree (nivel_acesso_id);
+
+
+--
+-- Name: uq_pdv_lancamentos_pedido_unico; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_pdv_lancamentos_pedido_unico ON public.pdv_lancamentos USING btree (pedido_id);
+
+
+--
+-- Name: uq_pedido_nfe_pedido_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_pedido_nfe_pedido_id ON public.pedido_nfe USING btree (pedido_id);
+
+
+--
+-- Name: contas_pagar trg_bloquear_delete_cp_protegido; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_delete_cp_protegido BEFORE DELETE ON public.contas_pagar FOR EACH ROW EXECUTE FUNCTION public.bloquear_delete_protegido();
+
+
+--
+-- Name: contas_receber trg_bloquear_delete_cr_com_nfe; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_delete_cr_com_nfe BEFORE DELETE OR UPDATE ON public.contas_receber FOR EACH ROW EXECUTE FUNCTION public.bloquear_delete_update_cr_com_nfe_autorizada();
+
+
+--
+-- Name: TRIGGER trg_bloquear_delete_cr_com_nfe ON contas_receber; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TRIGGER trg_bloquear_delete_cr_com_nfe ON public.contas_receber IS 'Impede DELETE e mudanca de status para CANCELADO em contas_receber quando o pedido vinculado possui NF-e AUTORIZADA.';
+
+
+--
+-- Name: contas_receber trg_bloquear_delete_cr_protegido; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_delete_cr_protegido BEFORE DELETE ON public.contas_receber FOR EACH ROW EXECUTE FUNCTION public.bloquear_delete_protegido();
+
+
+--
+-- Name: movimentacoes trg_bloquear_delete_mov_protegido; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_delete_mov_protegido BEFORE DELETE ON public.movimentacoes FOR EACH ROW EXECUTE FUNCTION public.bloquear_delete_protegido();
+
+
+--
+-- Name: pdv_vendas trg_bloquear_delete_pdv_venda; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_delete_pdv_venda BEFORE DELETE ON public.pdv_vendas FOR EACH ROW EXECUTE FUNCTION public.bloquear_delete_venda_protegida();
+
+
+--
+-- Name: licenca trg_bloquear_licenca_vencida; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_licenca_vencida BEFORE INSERT OR UPDATE ON public.licenca FOR EACH ROW EXECUTE FUNCTION public.bloquear_licenca_vencida();
+
+
+--
+-- Name: pdv_vendas trg_bloquear_venda_caixa_fechado; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_bloquear_venda_caixa_fechado BEFORE INSERT ON public.pdv_vendas FOR EACH ROW EXECUTE FUNCTION public.bloquear_venda_caixa_fechado();
+
+
+--
+-- Name: categorias_dre trg_categorias_dre_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_categorias_dre_updated_at BEFORE UPDATE ON public.categorias_dre FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: clientes trg_clientes_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_clientes_updated_at BEFORE UPDATE ON public.clientes FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: configuracoes trg_configuracoes_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_configuracoes_updated_at BEFORE UPDATE ON public.configuracoes FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: contas_pagar trg_contas_pagar_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contas_pagar_updated_at BEFORE UPDATE ON public.contas_pagar FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: contas_receber trg_contas_receber_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contas_receber_updated_at BEFORE UPDATE ON public.contas_receber FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: contas trg_contas_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contas_updated_at BEFORE UPDATE ON public.contas FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: empresa_fiscal_servico trg_empresa_fiscal_servico_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_empresa_fiscal_servico_updated_at BEFORE UPDATE ON public.empresa_fiscal_servico FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: formas_pagamento trg_formas_pagamento_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_formas_pagamento_updated_at BEFORE UPDATE ON public.formas_pagamento FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: licenca trg_licenca_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_licenca_updated_at BEFORE UPDATE ON public.licenca FOR EACH ROW EXECUTE FUNCTION public.update_licenca_updated_at();
+
+
+--
+-- Name: niveis_acesso trg_niveis_acesso_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_niveis_acesso_updated_at BEFORE UPDATE ON public.niveis_acesso FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: nota_fiscal_servico trg_nota_fiscal_servico_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_nota_fiscal_servico_updated_at BEFORE UPDATE ON public.nota_fiscal_servico FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: pdv_caixas trg_pdv_caixas_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_pdv_caixas_updated_at BEFORE UPDATE ON public.pdv_caixas FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: pdv_vendas trg_pdv_vendas_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_pdv_vendas_updated_at BEFORE UPDATE ON public.pdv_vendas FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: pedido_itens trg_pedido_itens_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_pedido_itens_updated_at BEFORE UPDATE ON public.pedido_itens FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: pedidos trg_pedidos_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_pedidos_updated_at BEFORE UPDATE ON public.pedidos FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: permissoes_personalizadas trg_permissoes_personalizadas_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_permissoes_personalizadas_updated_at BEFORE UPDATE ON public.permissoes_personalizadas FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: produto_fiscal trg_produto_fiscal_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_produto_fiscal_updated_at BEFORE UPDATE ON public.produto_fiscal FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: produtos trg_produtos_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_produtos_updated_at BEFORE UPDATE ON public.produtos FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: usuarios trg_usuarios_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_usuarios_updated_at BEFORE UPDATE ON public.usuarios FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+
+--
+-- Name: movimentacoes trigger_atualizar_saldo_conta; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trigger_atualizar_saldo_conta AFTER INSERT OR DELETE ON public.movimentacoes FOR EACH ROW EXECUTE FUNCTION public.atualizar_saldo_conta_trigger();
+
+
+--
+-- Name: TRIGGER trigger_atualizar_saldo_conta ON movimentacoes; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TRIGGER trigger_atualizar_saldo_conta ON public.movimentacoes IS 'Atualiza saldo_atual da conta ao inserir/deletar movimentacoes. 
+UPDATE manual para consistencia.';
+
+
+--
+-- Name: auditoria auditoria_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.auditoria
+    ADD CONSTRAINT auditoria_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
+
+
+--
+-- Name: clientes clientes_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.clientes
+    ADD CONSTRAINT clientes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contas_pagar contas_pagar_categoria_dre_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_pagar
+    ADD CONSTRAINT contas_pagar_categoria_dre_id_fkey FOREIGN KEY (categoria_dre_id) REFERENCES public.categorias_dre(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contas_pagar contas_pagar_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_pagar
+    ADD CONSTRAINT contas_pagar_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contas_receber contas_receber_categoria_dre_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_receber
+    ADD CONSTRAINT contas_receber_categoria_dre_id_fkey FOREIGN KEY (categoria_dre_id) REFERENCES public.categorias_dre(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contas_receber contas_receber_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_receber
+    ADD CONSTRAINT contas_receber_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contas_receber contas_receber_forma_pagamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_receber
+    ADD CONSTRAINT contas_receber_forma_pagamento_id_fkey FOREIGN KEY (forma_pagamento_id) REFERENCES public.formas_pagamento(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contas_receber contas_receber_pdv_venda_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contas_receber
+    ADD CONSTRAINT contas_receber_pdv_venda_id_fkey FOREIGN KEY (pdv_venda_id) REFERENCES public.pdv_vendas(id) ON DELETE SET NULL;
+
+
+--
+-- Name: formas_pagamento formas_pagamento_adquirente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.formas_pagamento
+    ADD CONSTRAINT formas_pagamento_adquirente_id_fkey FOREIGN KEY (adquirente_id) REFERENCES public.clientes(id) ON DELETE SET NULL;
+
+
+--
+-- Name: formas_pagamento formas_pagamento_conta_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.formas_pagamento
+    ADD CONSTRAINT formas_pagamento_conta_id_fkey FOREIGN KEY (conta_id) REFERENCES public.contas(id) ON DELETE SET NULL;
+
+
+--
+-- Name: movimentacoes movimentacoes_categoria_dre_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes
+    ADD CONSTRAINT movimentacoes_categoria_dre_id_fkey FOREIGN KEY (categoria_dre_id) REFERENCES public.categorias_dre(id) ON DELETE SET NULL;
+
+
+--
+-- Name: movimentacoes movimentacoes_conta_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes
+    ADD CONSTRAINT movimentacoes_conta_id_fkey FOREIGN KEY (conta_id) REFERENCES public.contas(id) ON DELETE CASCADE;
+
+
+--
+-- Name: movimentacoes movimentacoes_conta_pagar_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes
+    ADD CONSTRAINT movimentacoes_conta_pagar_id_fkey FOREIGN KEY (conta_pagar_id) REFERENCES public.contas_pagar(id) ON DELETE SET NULL;
+
+
+--
+-- Name: movimentacoes movimentacoes_conta_receber_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes
+    ADD CONSTRAINT movimentacoes_conta_receber_id_fkey FOREIGN KEY (conta_receber_id) REFERENCES public.contas_receber(id) ON DELETE SET NULL;
+
+
+--
+-- Name: movimentacoes movimentacoes_forma_pagamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.movimentacoes
+    ADD CONSTRAINT movimentacoes_forma_pagamento_id_fkey FOREIGN KEY (forma_pagamento_id) REFERENCES public.formas_pagamento(id) ON DELETE SET NULL;
+
+
+--
+-- Name: notificacoes notificacoes_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notificacoes
+    ADD CONSTRAINT notificacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pdv_caixas pdv_caixas_conferencia_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_caixas
+    ADD CONSTRAINT pdv_caixas_conferencia_usuario_id_fkey FOREIGN KEY (conferencia_usuario_id) REFERENCES public.usuarios(id);
+
+
+--
+-- Name: pdv_caixas pdv_caixas_usuario_abertura_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_caixas
+    ADD CONSTRAINT pdv_caixas_usuario_abertura_id_fkey FOREIGN KEY (usuario_abertura_id) REFERENCES public.usuarios(id);
+
+
+--
+-- Name: pdv_conferencia_itens pdv_conferencia_itens_caixa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_conferencia_itens
+    ADD CONSTRAINT pdv_conferencia_itens_caixa_id_fkey FOREIGN KEY (caixa_id) REFERENCES public.pdv_caixas(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pdv_conferencia_itens pdv_conferencia_itens_forma_pagamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_conferencia_itens
+    ADD CONSTRAINT pdv_conferencia_itens_forma_pagamento_id_fkey FOREIGN KEY (forma_pagamento_id) REFERENCES public.formas_pagamento(id);
+
+
+--
+-- Name: pdv_lancamentos pdv_lancamentos_caixa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_lancamentos
+    ADD CONSTRAINT pdv_lancamentos_caixa_id_fkey FOREIGN KEY (caixa_id) REFERENCES public.pdv_caixas(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pdv_lancamentos pdv_lancamentos_pedido_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_lancamentos
+    ADD CONSTRAINT pdv_lancamentos_pedido_id_fkey FOREIGN KEY (pedido_id) REFERENCES public.pedidos(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: pdv_lancamentos pdv_lancamentos_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_lancamentos
+    ADD CONSTRAINT pdv_lancamentos_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+
+
+--
+-- Name: pdv_venda_itens pdv_venda_itens_produto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_venda_itens
+    ADD CONSTRAINT pdv_venda_itens_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pdv_venda_itens pdv_venda_itens_servico_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_venda_itens
+    ADD CONSTRAINT pdv_venda_itens_servico_id_fkey FOREIGN KEY (servico_id) REFERENCES public.servicos_catalogo(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pdv_venda_itens pdv_venda_itens_venda_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_venda_itens
+    ADD CONSTRAINT pdv_venda_itens_venda_id_fkey FOREIGN KEY (venda_id) REFERENCES public.pdv_vendas(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pdv_vendas pdv_vendas_caixa_conferencia_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_caixa_conferencia_id_fkey FOREIGN KEY (caixa_conferencia_id) REFERENCES public.pdv_caixas(id);
+
+
+--
+-- Name: pdv_vendas pdv_vendas_caixa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_caixa_id_fkey FOREIGN KEY (caixa_id) REFERENCES public.pdv_caixas(id);
+
+
+--
+-- Name: pdv_vendas pdv_vendas_cancelado_por_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_cancelado_por_id_fkey FOREIGN KEY (cancelado_por_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pdv_vendas pdv_vendas_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pdv_vendas pdv_vendas_forma_pagamento_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_forma_pagamento_id_fkey FOREIGN KEY (forma_pagamento_id) REFERENCES public.formas_pagamento(id);
+
+
+--
+-- Name: pdv_vendas pdv_vendas_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pdv_vendas
+    ADD CONSTRAINT pdv_vendas_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id);
+
+
+--
+-- Name: pedido_itens pedido_itens_pedido_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedido_itens
+    ADD CONSTRAINT pedido_itens_pedido_id_fkey FOREIGN KEY (pedido_id) REFERENCES public.pedidos(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pedido_itens pedido_itens_produto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedido_itens
+    ADD CONSTRAINT pedido_itens_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pedido_nfe pedido_nfe_pedido_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedido_nfe
+    ADD CONSTRAINT pedido_nfe_pedido_id_fkey FOREIGN KEY (pedido_id) REFERENCES public.pedidos(id) ON DELETE CASCADE;
+
+
+--
+-- Name: pedidos pedidos_cliente_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedidos
+    ADD CONSTRAINT pedidos_cliente_id_fkey FOREIGN KEY (cliente_id) REFERENCES public.clientes(id) ON DELETE SET NULL;
+
+
+--
+-- Name: pedidos pedidos_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.pedidos
+    ADD CONSTRAINT pedidos_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
+
+
+--
+-- Name: permissoes_nivel permissoes_nivel_modulo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_nivel
+    ADD CONSTRAINT permissoes_nivel_modulo_id_fkey FOREIGN KEY (modulo_id) REFERENCES public.modulos(id) ON DELETE CASCADE;
+
+
+--
+-- Name: permissoes_nivel permissoes_nivel_nivel_acesso_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_nivel
+    ADD CONSTRAINT permissoes_nivel_nivel_acesso_id_fkey FOREIGN KEY (nivel_acesso_id) REFERENCES public.niveis_acesso(id) ON DELETE CASCADE;
+
+
+--
+-- Name: permissoes_personalizadas permissoes_personalizadas_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_personalizadas
+    ADD CONSTRAINT permissoes_personalizadas_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE;
+
+
+--
+-- Name: permissoes_usuario permissoes_usuario_modulo_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_usuario
+    ADD CONSTRAINT permissoes_usuario_modulo_id_fkey FOREIGN KEY (modulo_id) REFERENCES public.modulos(id) ON DELETE CASCADE;
+
+
+--
+-- Name: permissoes_usuario permissoes_usuario_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.permissoes_usuario
+    ADD CONSTRAINT permissoes_usuario_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE CASCADE;
+
+
+--
+-- Name: produto_estoque_movimentacoes produto_estoque_movimentacoes_produto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_estoque_movimentacoes
+    ADD CONSTRAINT produto_estoque_movimentacoes_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id) ON DELETE CASCADE;
+
+
+--
+-- Name: produto_estoque_movimentacoes produto_estoque_movimentacoes_usuario_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_estoque_movimentacoes
+    ADD CONSTRAINT produto_estoque_movimentacoes_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE SET NULL;
+
+
+--
+-- Name: produto_fiscal produto_fiscal_produto_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.produto_fiscal
+    ADD CONSTRAINT produto_fiscal_produto_id_fkey FOREIGN KEY (produto_id) REFERENCES public.produtos(id) ON DELETE CASCADE;
+
+
+--
+-- Name: usuarios usuarios_nivel_acesso_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.usuarios
+    ADD CONSTRAINT usuarios_nivel_acesso_id_fkey FOREIGN KEY (nivel_acesso_id) REFERENCES public.niveis_acesso(id);
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict mkfFVUslMTV9U8wzgvHs9PzCTIoYV23DfLBPxabUbOh2xBbxOBBnSFY6CDgKVNM
+
+
+-- ============================================================================
+-- DADOS INICIAIS (SEEDS)
+-- ============================================================================
+SET search_path = public, pg_catalog;
+--
+-- PostgreSQL database dump
+--
+
+\restrict giuOXlsfFKLxKAHkeeyOZaSbhCrrWLQRHPQOzuiOF9tuBdRPf3uW4mIMxwN2SVi
+
+-- Dumped from database version 13.22
+-- Dumped by pg_dump version 13.22
+
+
+--
+-- Data for Name: categorias_dre; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+INSERT INTO public.categorias_dre VALUES (1, 'Vendas de Produtos', 'Receita', 'Receita bruta com vendas de produtos', 1, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (2, 'Vendas de Servicos', 'Receita', 'Receita bruta com prestacao de servicos', 2, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (3, 'Receitas Financeiras', 'Receita', 'Juros e rendimentos financeiros', 3, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (4, 'Outras Receitas Operacionais', 'Receita', 'Outras receitas brutas operacionais', 4, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (5, 'ICMS sobre Vendas', 'Deducao', 'Imposto ICMS incidente sobre vendas', 10, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (6, 'IPI sobre Vendas', 'Deducao', 'Imposto IPI incidente sobre vendas', 11, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (7, 'PIS sobre Vendas', 'Deducao', 'PIS incidente sobre faturamento', 12, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (8, 'COFINS sobre Vendas', 'Deducao', 'COFINS incidente sobre faturamento', 13, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (9, 'ISS sobre Servicos', 'Deducao', 'ISS incidente sobre prestacao de servicos', 14, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (10, 'Devolucoes de Vendas', 'Deducao', 'Devolucoes de produtos vendidos', 15, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (11, 'Abatimentos Comerciais', 'Deducao', 'Abatimentos e descontos comerciais', 16, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (12, 'Descontos obtidos', 'Deducao', 'Descontos obtidos', 17, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (13, 'Custo de Mercadorias Vendidas - CMV', 'CPV', 'Custo das mercadorias vendidas no periodo', 20, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (14, 'Custo de Produtos Vendidos - CPV', 'CPV', 'Custo dos produtos fabricados e vendidos', 21, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (15, 'Materia-Prima', 'CPV', 'Custo com materia-prima para producao', 22, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (16, 'Embalagens', 'CPV', 'Custo com embalagens para produtos', 23, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (17, 'Frete de Compras', 'CPV', 'Frete e transporte de compras', 24, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (18, 'Compras de Mercadoria', 'CPV', 'Compras de mercadoria para revenda', 25, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (19, 'Salarios - Vendedores', 'Despesa Operacional', 'Salarios e comissoes da equipe de vendas', 30, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (20, 'Marketing e Publicidade', 'Despesa Operacional', 'Despesas com marketing e publicidade', 31, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (21, 'Propaganda e Promocao', 'Despesa Operacional', 'Despesas com propaganda e promocoes', 32, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (22, 'Comissoes sobre Vendas', 'Despesa Operacional', 'Comissoes pagas sobre vendas', 33, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (23, 'Salarios - Administracao', 'Despesa Operacional', 'Salarios da equipe administrativa', 40, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (24, 'Aluguel de Imoveis', 'Despesa Operacional', 'Aluguel de imoveis comerciais e industriais', 41, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (25, 'Agua e Esgoto', 'Despesa Operacional', 'Despesas com Agua e esgoto', 42, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (26, 'Energia Eletrica', 'Despesa Operacional', 'Despesas com energia eletrica', 43, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (27, 'Telefone e Internet', 'Despesa Operacional', 'Despesas com telefonia e internet', 44, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (28, 'Material de Escritorio', 'Despesa Operacional', 'Material de escritorio e suprimentos', 45, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (29, 'Servicos de Terceiros', 'Despesa Operacional', 'Servicos contratados de terceiros', 46, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (30, 'Honorarios Contabeis', 'Despesa Operacional', 'Honorarios de contador e advocacia', 47, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (31, 'Seguros', 'Despesa Operacional', 'Premios de seguros diversos', 48, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (32, 'Depreciacao de Ativos', 'Despesa Operacional', 'Depreciacao de moveis e utensilios', 49, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (33, 'Despesas de Viagem (Hotel)', 'Despesa Operacional', 'Despesas com hospedagem em viagens', 26, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (34, 'Despesas de Viagem (Cafe da Manha)', 'Despesa Operacional', 'Despesas com cafe da manha em viagens', 27, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (35, 'Despesas de Viagem (Abastecimentos)', 'Despesa Operacional', 'Despesas com abastecimento de veiculos em viagens', 28, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (36, 'Uso e Consumo', 'Despesa Operacional', 'Despesas com uso e consumo de materiais', 29, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (37, 'Juros Passivos', 'Despesa Financeira', 'Juros pagos sobre emprastimos e financiamentos', 50, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (38, 'Taxas BancÃ¡rias', 'Despesa Financeira', 'Taxas e tarifas BancÃ¡rias', 51, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (39, 'Variacoes Cambiais', 'Despesa Financeira', 'Perdas com variacao cambial', 52, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (40, 'Descontos Cedidos em Vendas', 'Despesa Operacional', 'Descontos concedidos em operacoes de venda', 37, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (41, 'Imposto de Renda - PJ', 'Tributo', 'Imposto de Renda Pessoa Juridica', 60, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (42, 'Contribuicao Social - CSLL', 'Tributo', 'Contribuicao Social sobre Lucro Liquido', 61, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (43, 'Provisoes', 'Outras', 'Provisoes diversas', 70, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (44, 'Resultados Nao Operacionais', 'Outras', 'Resultados de transacoes nao operacionais', 71, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+
+
+--
+-- Data for Name: configuracoes; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+INSERT INTO public.configuracoes VALUES (1, 'nome_sistema', 'Sistema de Chamados', 'Nome do sistema exibido no cabecalho', 'text', 'Geral', 1, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (2, 'logo_sistema', 'logo.png', 'Logo do sistema', 'image', 'Aparencia', 2, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (3, 'cor_primaria', '#4361ee', 'Cor primaria do sistema', 'color', 'Aparencia', 3, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (4, 'itens_por_pagina', '10', 'Numero de itens por pagina nas listagens', 'number', 'Sistema', 4, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (5, 'manutencao', 'false', 'Ativar modo manutencao', 'boolean', 'Sistema', 5, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (6, 'email_notificacao', 'suporte@empresa.com', 'E-mail para notificacoes', 'email', 'E-mail', 6, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (7, 'smtp_host', 'smtp.empresa.com', 'Servidor SMTP', 'text', 'E-mail', 7, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (8, 'smtp_porta', '587', 'Porta SMTP', 'number', 'E-mail', 8, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (9, 'smtp_usuario', 'usuario@empresa.com', 'Usuario SMTP', 'text', 'E-mail', 9, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (10, 'smtp_senha', '', 'Senha SMTP', 'password', 'E-mail', 10, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (11, 'endereco_empresa', 'Rua Exemplo, 123', 'Endereco da empresa', 'text', 'Empresa', 11, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.configuracoes VALUES (12, 'telefone_contato', '(11) 1234-5678', 'Telefone para contato', 'text', 'Empresa', 12, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+
+
+--
+-- Data for Name: formas_pagamento; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+INSERT INTO public.formas_pagamento VALUES (1, 'Dinheiro', 'D', 'Pagamento em dinheiro', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.formas_pagamento VALUES (2, 'CartÃ£o de DÃ©bito', 'CD', 'CartÃ£o de DÃ©bito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.614791-03');
+INSERT INTO public.formas_pagamento VALUES (3, 'CartÃ£o de CrÃ©dito', 'CC', 'CartÃ£o de CrÃ©dito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.617959-03');
+INSERT INTO public.formas_pagamento VALUES (4, 'PIX', 'PIX', 'TransferÃªncia via PIX', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+INSERT INTO public.formas_pagamento VALUES (5, 'Boleto', 'BOL', 'Boleto bancario', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+INSERT INTO public.formas_pagamento VALUES (6, 'TransferÃªncia BancÃ¡ria', 'TB', 'Transferencia bancaria', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+INSERT INTO public.formas_pagamento VALUES (7, 'A faturar', 'AF', 'Pagamento a prazo', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+
+
+--
+-- Data for Name: modulos; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+INSERT INTO public.modulos VALUES (1, 'dashboard', 'Dashboard', 'fa-gauge', 1);
+INSERT INTO public.modulos VALUES (2, 'clientes', 'Clientes', 'fa-users', 2);
+INSERT INTO public.modulos VALUES (3, 'produtos', 'Produtos', 'fa-boxes', 3);
+INSERT INTO public.modulos VALUES (6, 'financeiro', 'Financeiro', 'fa-chart-line', 6);
+INSERT INTO public.modulos VALUES (7, 'rel_pedidos', 'Relatorios de Pedidos', 'fa-file-alt', 7);
+INSERT INTO public.modulos VALUES (8, 'rel_financeiro', 'Relatorios Financeiros', 'fa-file-chart-line', 8);
+INSERT INTO public.modulos VALUES (9, 'fiscal', 'Fiscal', 'fa-file-invoice-dollar', 9);
+INSERT INTO public.modulos VALUES (10, 'servicos', 'Servicos', 'fa-tools', 8);
+INSERT INTO public.modulos VALUES (28, 'pdv', 'PDV', 'fa-cash-register', 10);
+INSERT INTO public.modulos VALUES (29, 'usuarios', 'Usuarios', 'fa-users-gear', 11);
+INSERT INTO public.modulos VALUES (30, 'relatorios', 'Relatorios', 'fa-file-alt', 12);
+
+
+--
+-- Data for Name: niveis_acesso; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+INSERT INTO public.niveis_acesso VALUES (1, 'Administrador', 'Acesso total ao sistema', '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.niveis_acesso VALUES (2, 'Suporte', 'Acesso as funcionalidades de suporte', '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.niveis_acesso VALUES (3, 'Financeiro', 'Acesso ao modulo financeiro', '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.niveis_acesso VALUES (4, 'Personalizado', 'Acesso configurado individualmente por modulo', '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.niveis_acesso VALUES (5, 'Cliente', 'Acesso restrito ao proprio perfil e chamados', '2026-04-18 17:00:45.519468-03', '2026-04-18 17:00:45.519468-03');
+
+
+--
+-- Data for Name: permissoes_nivel; Type: TABLE DATA; Schema: public; Owner: -
+--
+
+INSERT INTO public.permissoes_nivel VALUES (1, 1);
+INSERT INTO public.permissoes_nivel VALUES (1, 2);
+INSERT INTO public.permissoes_nivel VALUES (1, 3);
+INSERT INTO public.permissoes_nivel VALUES (1, 6);
+INSERT INTO public.permissoes_nivel VALUES (1, 7);
+INSERT INTO public.permissoes_nivel VALUES (1, 8);
+INSERT INTO public.permissoes_nivel VALUES (2, 1);
+INSERT INTO public.permissoes_nivel VALUES (2, 2);
+INSERT INTO public.permissoes_nivel VALUES (2, 3);
+INSERT INTO public.permissoes_nivel VALUES (2, 7);
+INSERT INTO public.permissoes_nivel VALUES (3, 1);
+INSERT INTO public.permissoes_nivel VALUES (3, 6);
+INSERT INTO public.permissoes_nivel VALUES (3, 8);
+INSERT INTO public.permissoes_nivel VALUES (1, 9);
+INSERT INTO public.permissoes_nivel VALUES (1, 10);
+INSERT INTO public.permissoes_nivel VALUES (1, 28);
+INSERT INTO public.permissoes_nivel VALUES (1, 29);
+INSERT INTO public.permissoes_nivel VALUES (1, 30);
+
+
+--
+-- Name: categorias_dre_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: configuracoes_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: formas_pagamento_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: modulos_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
+--
+
+
+
+--
+-- Name: niveis_acesso_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
+--
+
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict giuOXlsfFKLxKAHkeeyOZaSbhCrrWLQRHPQOzuiOF9tuBdRPf3uW4mIMxwN2SVi
+
+
+-- ============================================================================
+-- USUARIO ADMIN PADRAO (senha: admin123)
+-- ============================================================================
+INSERT INTO usuarios (nome, email, senha, nivel_acesso_id, ativo)
+VALUES ('Administrador', 'admin@suporte.com',
+        '$2y$10$wB0zrwdGRYvik1hTLMMVcuimbgaJpT7g.3CPBm8MmAL/LIvsdriOy', 1, TRUE)
+ON CONFLICT (email) DO NOTHING;
 
 -- ============================================================================
 -- MENSAGEM FINAL
 -- ============================================================================
-DO $$
+DO $dm_final$
 BEGIN
-    RAISE NOTICE '';
     RAISE NOTICE '================================================================';
-    RAISE NOTICE '- TABELA LICENCA CRIADA COM SUCESSO';
+    RAISE NOTICE 'Banco de dados do Sistema DM criado com sucesso.';
+    RAISE NOTICE 'Usuario admin: admin@suporte.com  /  Senha: admin123';
+    RAISE NOTICE 'Lembre-se de trocar a senha do admin apos o primeiro login.';
     RAISE NOTICE '================================================================';
-    RAISE NOTICE '  - Tabela licenca criada';
-    RAISE NOTICE '  - dias_restantes calculado automaticamente';
-    RAISE NOTICE '  - Trigger de bloqueio automatico por vencimento';
-    RAISE NOTICE '  - Trigger de updated_at';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Proximo passo: executar master.sql no banco licencas_master';
-    RAISE NOTICE '================================================================';
-END $$;
-
-
--- ============================================================================
--- FINALIZACAO E MENSAGENS
--- ============================================================================
-
-DO $$
-BEGIN
-    RAISE NOTICE '';
-    RAISE NOTICE '================================================================';
-    RAISE NOTICE '- BANCO DE DADOS CRIADO COM SUCESSO';
-    RAISE NOTICE '================================================================';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Extensoes instaladas:';
-    RAISE NOTICE '  - uuid-ossp (geracao de UUIDs)';
-    RAISE NOTICE '  - pg_trgm (busca textual otimizada)';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Tabelas criadas: 20';
-    RAISE NOTICE '  - niveis_acesso, usuarios, clientes';
-    RAISE NOTICE '  - notificacoes, configuracoes, auditoria';
-    RAISE NOTICE '  - formas_pagamento, contas, categorias_dre';
-    RAISE NOTICE '  - contas_receber, contas_pagar, movimentacoes';
-    RAISE NOTICE '  - produtos, produto_fiscal';
-    RAISE NOTICE '  - orcamentos, orcamento_itens';
-    RAISE NOTICE '  - pedidos, pedido_itens';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Otimizacoes aplicadas:';
-    RAISE NOTICE '  - 6 Indices otimizados para Kanban (90%% mais rapido)';
-    RAISE NOTICE '  - 2 Indices GIN para busca textual com ILIKE';
-    RAISE NOTICE '  - Indices parciais com WHERE para economia de espaco';
-    RAISE NOTICE '  - Status EM_PROCESSO incorporado para Kanban visual';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Dados iniciais:';
-    RAISE NOTICE '  - 4 niveis de acesso';
-    RAISE NOTICE '  - 1 usuario admin (email: admin@suporte.com, senha: admin123)';
-    RAISE NOTICE '  - 12 configuracoes do sistema';
-    RAISE NOTICE '  - 6 formas de pagamento';
-    RAISE NOTICE '  - 40+ categorias DRE completas';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Proximos passos:';
-    RAISE NOTICE '  1. Alterar senha do usuario admin';
-    RAISE NOTICE '  2. Configurar SMTP nas configuracoes';
-    RAISE NOTICE '  3. Cadastrar contas BancÃ¡rias';
-    RAISE NOTICE '  4. Cadastrar produtos';
-    RAISE NOTICE '';
-    RAISE NOTICE 'Performance esperada:';
-    RAISE NOTICE '  - Kanban: ~120ms para 10.000 pedidos';
-    RAISE NOTICE '  - Busca clientes: ~40ms para 10.000 registros';
-    RAISE NOTICE '  - Busca pedidos: ~80ms para 10.000 registros';
-    RAISE NOTICE '';
-    RAISE NOTICE '================================================================';
-    RAISE NOTICE 'Sistema pronto para uso! ';
-    RAISE NOTICE '================================================================';
-    RAISE NOTICE '';
-END $$;
+END $dm_final$;
