@@ -1,0 +1,6 @@
+[2026-03-17 22:11:54] pedido_id=12cf3923-7676-489c-88cc-da46ef506d82 erro=SQLSTATE[42703]: Undefined column: 7 ERROR:  column c.logradouro does not exist
+LINE 2: ...              c.nome AS cliente_nome, c.cpf_cnpj, c.logradou...
+                                                             ^
+[2026-03-25 20:50:45] pedido_id=12cf3923-7676-489c-88cc-da46ef506d82 erro=SQLSTATE[42703]: Undefined column: 7 ERROR:  column c.logradouro does not exist
+LINE 2: ...              c.nome AS cliente_nome, c.cpf_cnpj, c.logradou...
+                                                             ^

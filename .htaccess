@@ -1,0 +1,70 @@
+RewriteEngine On
+RewriteBase /sistema_dm/
+
+# Endpoints AJAX dos dashboards (sem tenant)
+RewriteRule ^dashboard/kpis/?$ public/dashboard/kpis.php [QSA,L]
+RewriteRule ^dashboard/faturamento/?$ public/dashboard/faturamento.php [QSA,L]
+RewriteRule ^dashboard/atividade-recente/?$ public/dashboard/atividade-recente.php [QSA,L]
+RewriteRule ^financeiro/dashboard/kpis/?$ public/financeiro/dashboard/kpis.php [QSA,L]
+RewriteRule ^financeiro/dashboard/receitas-despesas/?$ public/financeiro/dashboard/receitas-despesas.php [QSA,L]
+RewriteRule ^financeiro/dashboard/heatmap/?$ public/financeiro/dashboard/heatmap.php [QSA,L]
+RewriteRule ^financeiro/contas/pagar-receber/?$ public/financeiro/contas/pagar-receber.php [QSA,L]
+RewriteRule ^financeiro/conta/pagar/([0-9]+)/?$ public/financeiro/conta/pagar.php?id=$1 [QSA,L]
+RewriteRule ^financeiro/conta/receber/([0-9]+)/?$ public/financeiro/conta/receber.php?id=$1 [QSA,L]
+RewriteRule ^pdv/?$ public/pdv.php [QSA,L]
+RewriteRule ^pdv/abrir/?$ public/pdv.php?action=abrir-form [QSA,L]
+RewriteRule ^pdv/caixa/([0-9]+)/?$ public/pdv.php?action=caixa&id=$1 [QSA,L]
+RewriteRule ^pdv/caixa/([0-9]+)/fechar/?$ public/pdv.php?action=fechar-form&id=$1 [QSA,L]
+RewriteRule ^pdv/caixa/([0-9]+)/relatorio/?$ public/pdv.php?action=relatorio&id=$1 [QSA,L]
+RewriteRule ^pdv/caixa/([0-9]+)/pdf/?$ public/pdv/relatorio.php?action=pdf&id=$1 [QSA,L]
+RewriteRule ^pdv/caixa/([0-9]+)/termica/?$ public/pdv/relatorio.php?action=termica&id=$1 [QSA,L]
+RewriteRule ^pdv/clientes/?$ public/pdv/clientes.php [QSA,L]
+RewriteRule ^pdv/produtos/?$ public/pdv/produtos.php [QSA,L]
+RewriteRule ^pdv/pedidos/?$ public/pdv/pedidos.php [QSA,L]
+RewriteRule ^pdv/servicos/?$ public/pdv/servicos.php [QSA,L]
+RewriteRule ^pdv/lancamento/?$ public/pdv/lancamento.php [QSA,L]
+RewriteRule ^gerencial/caixas/?$ public/gerencial/caixas.php [QSA,L]
+RewriteRule ^gerencial/caixas/([0-9]+)/?$ public/gerencial/caixas.php?action=detalhe&id=$1 [QSA,L]
+RewriteRule ^gerencial/caixas/([0-9]+)/pdf/?$ public/gerencial/caixas.php?action=pdf&id=$1 [QSA,L]
+RewriteRule ^gerencial/caixas/([0-9]+)/termica/?$ public/gerencial/caixas.php?action=termica&id=$1 [QSA,L]
+
+# Endpoints AJAX dos dashboards (com tenant)
+RewriteRule ^(?!public/|license-system/)([^/]+)/dashboard/kpis/?$ public/dashboard/kpis.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/dashboard/faturamento/?$ public/dashboard/faturamento.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/dashboard/atividade-recente/?$ public/dashboard/atividade-recente.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/financeiro/dashboard/kpis/?$ public/financeiro/dashboard/kpis.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/financeiro/dashboard/receitas-despesas/?$ public/financeiro/dashboard/receitas-despesas.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/financeiro/dashboard/heatmap/?$ public/financeiro/dashboard/heatmap.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/financeiro/contas/pagar-receber/?$ public/financeiro/contas/pagar-receber.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/financeiro/conta/pagar/([0-9]+)/?$ public/financeiro/conta/pagar.php?tenant=$1&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/financeiro/conta/receber/([0-9]+)/?$ public/financeiro/conta/receber.php?tenant=$1&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/?$ public/pdv.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/abrir/?$ public/pdv.php?tenant=$1&action=abrir-form [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/caixa/([0-9]+)/?$ public/pdv.php?tenant=$1&action=caixa&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/caixa/([0-9]+)/fechar/?$ public/pdv.php?tenant=$1&action=fechar-form&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/caixa/([0-9]+)/relatorio/?$ public/pdv.php?tenant=$1&action=relatorio&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/caixa/([0-9]+)/pdf/?$ public/pdv/relatorio.php?tenant=$1&action=pdf&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/caixa/([0-9]+)/termica/?$ public/pdv/relatorio.php?tenant=$1&action=termica&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/clientes/?$ public/pdv/clientes.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/produtos/?$ public/pdv/produtos.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/pedidos/?$ public/pdv/pedidos.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/servicos/?$ public/pdv/servicos.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/pdv/lancamento/?$ public/pdv/lancamento.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/gerencial/caixas/?$ public/gerencial/caixas.php?tenant=$1 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/gerencial/caixas/([0-9]+)/?$ public/gerencial/caixas.php?tenant=$1&action=detalhe&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/gerencial/caixas/([0-9]+)/pdf/?$ public/gerencial/caixas.php?tenant=$1&action=pdf&id=$2 [QSA,L]
+RewriteRule ^(?!public/|license-system/)([^/]+)/gerencial/caixas/([0-9]+)/termica/?$ public/gerencial/caixas.php?tenant=$1&action=termica&id=$2 [QSA,L]
+
+# Redirecionar todas as requisicoes para a pasta public
+RewriteCond %{REQUEST_URI} !^/sistema_dm/public/
+RewriteCond %{REQUEST_URI} !^/sistema_dm/license-system/
+RewriteRule ^(.*)$ public/$1 [L]
+
+# Se o arquivo ou diretorio nao existir, redirecionar para o index.php
+RewriteCond %{REQUEST_URI} !^/sistema_dm/license-system/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ public/index.php?url=$1 [QSA,L]
+
+# Impedir listagem de diretorios
+Options -Indexes

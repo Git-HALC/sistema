@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "Bash(composer audit:*)",
+      "Bash(composer outdated:*)",
+      "Bash(composer show:*)",
+      "Bash(composer licenses:*)",
+      "Bash(php --version:*)",
+      "Bash(composer update:*)",
+      "Bash(wc:*)",
+      "Bash(powershell -Command \":*)",
+      "Bash(python3:*)",
+      "Bash(powershell -Command:*)",
+      "Read(//c/xampp/php/**)",
+      "Bash(/c/xampp/php/php.exe:*)",
+      "Bash(printf '%s':*)",
+      "Bash(powershell.exe -File \"C:\\\\xampp\\\\htdocs\\\\suporte_sistema\\\\write_files.ps1\")",
+      "Bash(/c/xampp/htdocs/suporte_sistema/_gen_conta_pagar.php:*)",
+      "Bash(# Use:*)",
+      "Bash(grep:*)",
+      "Bash(php -l:*)",
+      "Bash(C:xamppphpphp.exe -r \"echo extension_loaded\\(''gd''\\) ? ''GD OK'' : ''GD AUSENTE'';\")",
+      "Bash(php:*)",
+      "Bash(/c/xampp/php/composer.phar dump-autoload --optimize)",
+      "Read(//c/xampp/**)",
+      "Bash(/c/ProgramData/ComposerSetup/bin/composer dump-autoload:*)",
+      "Bash(composer dump-autoload:*)",
+      "Read(//c/xampp/htdocs/suporte_sistema/**)",
+      "Bash(done)",
+      "Bash(/tmp/audit_cross.php:*)",
+      "Bash(ls c:/xampp/htdocs/suporte_sistema/public/admin/*.php)",
+      "Bash(xargs -I{} basename {})"
+    ],
+    "additionalDirectories": [
+      "C:\\xampp\\htdocs\\suporte_sistema\\app\\domain\\orcamento",
+      "\\tmp",
+      "C:\\xampp\\php",
+      "c:\\xampp\\htdocs\\suporte_sistema\\app\\Modules",
+      "c:\\xampp\\htdocs\\suporte_sistema\\app\\Controllers"
+    ]
+  }
+}

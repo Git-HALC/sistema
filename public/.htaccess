@@ -1,0 +1,68 @@
+RewriteEngine On
+RewriteBase /sistema_dm/public/
+php_value auto_prepend_file "C:/xampp/htdocs/sistema_dm/config/tenant-prepend.php"
+
+# Redirecionar para HTTPS (opcional, descomente se necessario)
+# RewriteCond %{HTTPS} off
+# RewriteRule ^(.*)$ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# URLs de tenant: /public/<empresa>/...
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/?$ login.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/(login\.php|auth\.php|logout\.php|blocked\.php|index\.php)$ $2?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/(landing\.php|erro\.php|clientes\.php|orcamento_pdf_publico\.php)$ $2?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/(assets/.*|uploads/.*)$ $2?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/(admin/.*)$ $2?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/dashboard/kpis/?$ dashboard/kpis.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/dashboard/faturamento/?$ dashboard/faturamento.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/dashboard/atividade-recente/?$ dashboard/atividade-recente.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/financeiro/dashboard/kpis/?$ financeiro/dashboard/kpis.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/financeiro/dashboard/receitas-despesas/?$ financeiro/dashboard/receitas-despesas.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/financeiro/dashboard/heatmap/?$ financeiro/dashboard/heatmap.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/financeiro/contas/pagar-receber/?$ financeiro/contas/pagar-receber.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/financeiro/conta/pagar/([0-9]+)/?$ financeiro/conta/pagar.php?tenant=$1&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/financeiro/conta/receber/([0-9]+)/?$ financeiro/conta/receber.php?tenant=$1&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/?$ pdv.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/abrir/?$ pdv.php?tenant=$1&action=abrir-form [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/caixa/([0-9]+)/?$ pdv.php?tenant=$1&action=caixa&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/caixa/([0-9]+)/fechar/?$ pdv.php?tenant=$1&action=fechar-form&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/caixa/([0-9]+)/relatorio/?$ pdv.php?tenant=$1&action=relatorio&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/caixa/([0-9]+)/pdf/?$ pdv/relatorio.php?tenant=$1&action=pdf&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/caixa/([0-9]+)/termica/?$ pdv/relatorio.php?tenant=$1&action=termica&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/clientes/?$ pdv/clientes.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/produtos/?$ pdv/produtos.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/pedidos/?$ pdv/pedidos.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/servicos/?$ pdv/servicos.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/pdv/lancamento/?$ pdv/lancamento.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/gerencial/caixas/?$ gerencial/caixas.php?tenant=$1 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/gerencial/caixas/([0-9]+)/?$ gerencial/caixas.php?tenant=$1&action=detalhe&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/gerencial/caixas/([0-9]+)/pdf/?$ gerencial/caixas.php?tenant=$1&action=pdf&id=$2 [QSA,L,NC]
+RewriteRule ^([A-Za-z0-9][A-Za-z0-9_-]*)/gerencial/caixas/([0-9]+)/termica/?$ gerencial/caixas.php?tenant=$1&action=termica&id=$2 [QSA,L,NC]
+
+# Se o arquivo ou diretorio nao existir, redirecionar para o index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php?url=$1 [QSA,L]
+
+# Impedir listagem de diretorios
+Options -Indexes
+
+# Proteger contra acesso a arquivos sensiveis
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Configuracoes de cache para melhor desempenho
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpg "access plus 1 year"
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType text/css "access plus 1 month"
+    ExpiresByType application/pdf "access plus 1 month"
+    ExpiresByType text/x-javascript "access plus 1 month"
+    ExpiresByType application/x-shockwave-flash "access plus 1 month"
+    ExpiresByType image/x-icon "access plus 1 year"
+    ExpiresDefault "access plus 1 month"
+</IfModule>

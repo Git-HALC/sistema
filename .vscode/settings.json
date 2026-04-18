@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^php tmp/diag_salvar_cliente\\.php$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
