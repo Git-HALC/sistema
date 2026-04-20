@@ -12,7 +12,7 @@ DashboardApiResponder::run(
     'dashboard',
     'GET',
     static function (\PDO $pdo, array $request): array {
-        $period = DashboardApiResponder::enum($request, 'period', ['7D', '30D', '90D', '12M'], '30D');
+        $period = DashboardApiResponder::enum($request, 'period', ['7D', '30D', '90D'], '30D');
         return (new DashboardApiService($pdo))->getFaturamento($period);
     }
 );

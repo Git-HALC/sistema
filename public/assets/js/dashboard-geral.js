@@ -4,8 +4,24 @@
         return;
     }
 
+    const CHART_ANIMATION = { duration: 800, easing: 'easeInOutQuart' };
+    const PALETTE = {
+        primary: '#4f46e5',
+        success: '#10b981',
+        warning: '#f59e0b',
+        danger: '#ef4444',
+        info: '#0ea5e9',
+        purple: '#a855f7',
+        teal: '#14b8a6',
+        pink: '#ec4899'
+    };
+    const PALETTE_ARRAY = [PALETTE.primary, PALETTE.success, PALETTE.warning, PALETTE.danger, PALETTE.info, PALETTE.purple, PALETTE.teal, PALETTE.pink];
+
     const state = {
-        chart: null,
+        vendasChart: null,
+        formasChart: null,
+        topItensChart: null,
+        horaChart: null,
         period: '30D',
         activityPage: 1,
         activityPerPage: 8,
@@ -13,18 +29,17 @@
     };
 
     const kpiDefs = {
-        clientes_ativos: { label: 'Clientes ativos', icon: 'fa-users', href: config.links.clientes, valueType: 'integer' },
-        pedidos_mes: { label: 'Pedidos do mes', icon: 'fa-cart-shopping', href: config.links.pedidos, valueType: 'integer' },
-        servicos_em_andamento: { label: 'Servicos em andamento', icon: 'fa-screwdriver-wrench', href: config.links.servicos, valueType: 'integer' },
-        faturamento_mes: { label: 'Faturamento do mes', icon: 'fa-chart-line', href: config.links.financeiro, valueType: 'currency' }
+        faturamento_mes: { label: 'Faturamento do mes', icon: 'fa-chart-line', href: config.links.financeiro, valueType: 'currency', color: PALETTE.primary },
+        vendas_mes: { label: 'Vendas do mes', icon: 'fa-cart-shopping', href: config.links.vendas, valueType: 'integer', color: PALETTE.success },
+        ticket_medio: { label: 'Ticket medio', icon: 'fa-receipt', href: config.links.vendas, valueType: 'currency', color: PALETTE.info },
+        clientes_novos: { label: 'Clientes novos', icon: 'fa-user-plus', href: config.links.clientes, valueType: 'integer', color: PALETTE.purple },
+        estoque_critico: { label: 'Estoque critico', icon: 'fa-triangle-exclamation', href: config.links.produtos, valueType: 'integer', color: PALETTE.danger }
     };
 
     document.addEventListener('DOMContentLoaded', init);
 
     function init() {
         renderKpiShells();
-        renderInsightsSkeleton();
-        renderActivitySkeleton();
 
         document.getElementById('dashboardRefreshBtn').addEventListener('click', refreshDashboard);
         document.getElementById('activityPrevBtn').addEventListener('click', function () {
@@ -40,12 +55,10 @@
 
         document.querySelectorAll('[data-period]').forEach(function (button) {
             button.addEventListener('click', function () {
-                if (state.period === button.dataset.period) {
-                    return;
-                }
+                if (state.period === button.dataset.period) return;
                 state.period = button.dataset.period;
                 syncPeriodButtons();
-                loadChart();
+                loadAllPeriod();
             });
         });
 
@@ -55,15 +68,25 @@
 
     async function refreshDashboard() {
         setRefreshing(true);
-        clearFeedback('chartFeedback');
-        clearFeedback('activityFeedback');
-
         try {
-            await Promise.all([loadKpis(), loadChart(), loadActivity()]);
+            await Promise.all([
+                loadKpis(),
+                loadAllPeriod(),
+                loadActivity()
+            ]);
             document.getElementById('dashboardLastUpdate').textContent = 'Atualizado ' + formatTimestamp(new Date());
         } finally {
             setRefreshing(false);
         }
+    }
+
+    function loadAllPeriod() {
+        return Promise.all([
+            loadVendasChart(),
+            loadFormasChart(),
+            loadTopItens(),
+            loadVendasHora()
+        ]);
     }
 
     async function loadKpis() {
@@ -73,24 +96,53 @@
             Object.keys(kpiDefs).forEach(function (key) {
                 renderKpi(key, state.kpis[key] || {});
             });
-            renderInsights(state.kpis);
         } catch (error) {
             renderKpiError(error.message || 'Falha ao carregar os KPIs.');
-            renderInsightsError(error.message || 'Falha ao carregar o radar.');
         }
     }
 
-    async function loadChart() {
+    async function loadVendasChart() {
+        clearFeedback('chartFeedback');
         try {
             const payload = await fetchJson(config.api.faturamento + '?period=' + encodeURIComponent(state.period));
-            renderChart(payload);
-            clearFeedback('chartFeedback');
+            renderVendasChart(payload);
         } catch (error) {
-            showFeedback('chartFeedback', error.message || 'Falha ao carregar o grafico.', loadChart);
+            showFeedback('chartFeedback', error.message || 'Falha ao carregar vendas.', loadVendasChart);
+        }
+    }
+
+    async function loadFormasChart() {
+        clearFeedback('formasPagamentoFeedback');
+        try {
+            const payload = await fetchJson(config.api.formasPagamento + '?period=' + encodeURIComponent(state.period));
+            renderFormasChart(payload);
+        } catch (error) {
+            showFeedback('formasPagamentoFeedback', error.message || 'Falha ao carregar formas.', loadFormasChart);
+        }
+    }
+
+    async function loadTopItens() {
+        clearFeedback('topItensFeedback');
+        try {
+            const payload = await fetchJson(config.api.topItens + '?period=' + encodeURIComponent(state.period));
+            renderTopItensChart(payload);
+        } catch (error) {
+            showFeedback('topItensFeedback', error.message || 'Falha ao carregar top itens.', loadTopItens);
+        }
+    }
+
+    async function loadVendasHora() {
+        clearFeedback('vendasHoraFeedback');
+        try {
+            const payload = await fetchJson(config.api.vendasHora + '?period=' + encodeURIComponent(state.period));
+            renderHoraChart(payload);
+        } catch (error) {
+            showFeedback('vendasHoraFeedback', error.message || 'Falha ao carregar vendas por hora.', loadVendasHora);
         }
     }
 
     async function loadActivity() {
+        clearFeedback('activityFeedback');
         try {
             const qs = new URLSearchParams({
                 page: String(state.activityPage),
@@ -98,22 +150,17 @@
             });
             const payload = await fetchJson(config.api.atividade + '?' + qs.toString());
             renderActivity(payload.items || [], payload.pagination || {});
-            clearFeedback('activityFeedback');
         } catch (error) {
-            showFeedback('activityFeedback', error.message || 'Falha ao carregar a atividade recente.', loadActivity);
+            showFeedback('activityFeedback', error.message || 'Falha ao carregar atividade.', loadActivity);
         }
     }
 
     async function fetchJson(url) {
-        const response = await fetch(url, {
-            headers: { 'X-Requested-With': 'XMLHttpRequest' }
-        });
+        const response = await fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
         const payload = await response.json().catch(function () { return null; });
-
         if (!response.ok) {
             throw new Error((payload && payload.erro) || 'Requisicao falhou.');
         }
-
         return payload || {};
     }
 
@@ -124,7 +171,7 @@
             return [
                 '<a class="dash-card dash-card--interactive text-decoration-none text-reset" href="', escapeHtml(def.href || '#'), '" data-kpi-card="', key, '">',
                     '<div class="dash-kpi">',
-                        '<span class="dash-icon"><i class="fas ', escapeHtml(def.icon), '"></i></span>',
+                        '<span class="dash-icon" style="background: ', def.color, '15; color: ', def.color, '"><i class="fas ', escapeHtml(def.icon), '"></i></span>',
                         '<div class="dash-kpi__content">',
                             '<p class="dash-kpi__label">', escapeHtml(def.label), '</p>',
                             '<p class="dash-kpi__value dash-live-value" data-kpi-value="', key, '">--</p>',
@@ -134,7 +181,6 @@
                             '</div>',
                         '</div>',
                     '</div>',
-                    '<div class="dash-sparkline" data-kpi-spark="', key, '"><div class="dash-skeleton-block" style="min-height:3.5rem;"></div></div>',
                 '</a>'
             ].join('');
         }).join('');
@@ -142,14 +188,12 @@
 
     function renderKpi(key, item) {
         const def = kpiDefs[key];
-        if (!def) {
-            return;
-        }
+        if (!def) return;
 
-        setText('[data-kpi-value="' + key + '"]', def.valueType === 'currency' ? formatCurrency(item.valor || 0) : formatInteger(item.valor || 0));
+        const value = def.valueType === 'currency' ? formatCurrency(item.valor || 0) : formatInteger(item.valor || 0);
+        setText('[data-kpi-value="' + key + '"]', value);
         renderChange(document.querySelector('[data-kpi-change="' + key + '"]'), Number(item.variacao_percentual || 0));
-        setText('[data-kpi-meta="' + key + '"]', kpiMeta(def, item));
-        renderSparkline(document.querySelector('[data-kpi-spark="' + key + '"]'), item.sparkline || []);
+        setText('[data-kpi-meta="' + key + '"]', item.referencia || 'Atualizado em tempo real');
     }
 
     function renderKpiError(message) {
@@ -161,89 +205,189 @@
                 badge.textContent = 'Erro';
             }
             setText('[data-kpi-meta="' + key + '"]', message);
-            const spark = document.querySelector('[data-kpi-spark="' + key + '"]');
-            if (spark) {
-                spark.innerHTML = '<div class="dash-inline-error">Falha ao carregar</div>';
-            }
         });
     }
 
-    function renderInsights(kpis) {
-        const faturamento = kpis.faturamento_mes || {};
-        const total = Number(faturamento.valor || 0);
-        const pedidos = Number(faturamento.pedidos || 0);
-        const servicos = Number(faturamento.servicos || 0);
-        const pedidosShare = total > 0 ? Math.round((pedidos / total) * 100) : 0;
-        const servicosShare = total > 0 ? Math.round((servicos / total) * 100) : 0;
-
-        document.getElementById('insightsPanel').innerHTML = [
-            progressRow('Pedidos faturados', formatCurrency(pedidos), pedidosShare, 'success'),
-            progressRow('Servicos faturados', formatCurrency(servicos), servicosShare, 'warning'),
-            '<div class="dash-list">',
-                trendRow('Clientes ativos', kpis.clientes_ativos),
-                trendRow('Pedidos do mes', kpis.pedidos_mes),
-                trendRow('Servicos em andamento', kpis.servicos_em_andamento),
-                trendRow('Faturamento do mes', kpis.faturamento_mes),
-            '</div>'
-        ].join('');
-    }
-
-    function renderInsightsSkeleton() {
-        document.getElementById('insightsPanel').innerHTML = [
-            '<div class="dashboard-stack">',
-                '<div class="dash-skeleton-line dash-skeleton-line--lg"></div>',
-                '<div class="dash-skeleton-line"></div>',
-                '<div class="dash-skeleton-line"></div>',
-                '<div class="dash-skeleton-block"></div>',
-            '</div>'
-        ].join('');
-    }
-
-    function renderInsightsError(message) {
-        document.getElementById('insightsPanel').innerHTML = '<div class="dash-inline-error">' + escapeHtml(message) + '</div>';
-    }
-
-    function renderChart(payload) {
+    function renderVendasChart(payload) {
         const labels = payload.labels || [];
-        const series = payload.series || {};
-        document.getElementById('chartSubtitle').textContent = 'Pedidos e servicos faturados em ' + String(payload.periodo || state.period) + '.';
+        const vendas = (payload.series && payload.series.vendas) || [];
+        document.getElementById('chartSubtitle').textContent = 'Vendas PDV nos ultimos ' + state.period.replace('D', ' dias') + '.';
 
-        if (state.chart) {
-            state.chart.destroy();
-        }
+        if (state.vendasChart) state.vendasChart.destroy();
 
-        state.chart = new Chart(document.getElementById('dashboardFaturamentoChart'), {
-            type: 'bar',
+        const ctx = document.getElementById('dashboardVendasChart');
+        const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 280);
+        gradient.addColorStop(0, PALETTE.primary + '66');
+        gradient.addColorStop(1, PALETTE.primary + '05');
+
+        state.vendasChart = new Chart(ctx, {
+            type: 'line',
             data: {
                 labels: labels,
-                datasets: [
-                    { label: 'Pedidos', data: series.pedidos || [], backgroundColor: 'rgba(79,70,229,0.72)', borderRadius: 10, maxBarThickness: 24 },
-                    { label: 'Servicos', data: series.servicos || [], backgroundColor: 'rgba(16,185,129,0.68)', borderRadius: 10, maxBarThickness: 24 },
-                    { type: 'line', label: 'Total', data: series.total || [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.18)', fill: true, tension: 0.28, pointRadius: 3, pointHoverRadius: 5 }
-                ]
+                datasets: [{
+                    label: 'Vendas',
+                    data: vendas,
+                    borderColor: PALETTE.primary,
+                    backgroundColor: gradient,
+                    fill: true,
+                    tension: 0.32,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: PALETTE.primary,
+                    borderWidth: 2.5
+                }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                animation: CHART_ANIMATION,
                 interaction: { mode: 'index', intersect: false },
                 plugins: {
-                    legend: { position: 'bottom' },
+                    legend: { display: false },
                     tooltip: {
                         callbacks: {
-                            label: function (context) {
-                                return context.dataset.label + ': ' + formatCurrency(context.parsed.y || 0);
-                            }
+                            label: function (ctx) { return formatCurrency(ctx.parsed.y || 0); }
                         }
                     }
                 },
                 scales: {
                     y: {
                         grid: { color: 'rgba(148,163,184,0.14)' },
-                        ticks: {
-                            callback: function (value) { return formatCompactCurrency(value); }
-                        }
+                        ticks: { callback: function (v) { return formatCompactCurrency(v); } }
                     },
                     x: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    function renderFormasChart(payload) {
+        const labels = payload.labels || [];
+        const totais = payload.totais || [];
+
+        if (state.formasChart) state.formasChart.destroy();
+
+        if (!labels.length) {
+            document.getElementById('formasPagamentoFeedback').innerHTML = '<div class="dash-empty-state">Sem vendas no periodo.</div>';
+            return;
+        }
+
+        state.formasChart = new Chart(document.getElementById('dashboardFormasChart'), {
+            type: 'doughnut',
+            data: {
+                labels: labels,
+                datasets: [{
+                    data: totais,
+                    backgroundColor: labels.map(function (_, i) { return PALETTE_ARRAY[i % PALETTE_ARRAY.length]; }),
+                    borderWidth: 2,
+                    borderColor: getComputedStyle(document.body).getPropertyValue('--bs-body-bg') || '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: Object.assign({}, CHART_ANIMATION, { animateRotate: true, animateScale: true }),
+                cutout: '62%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, padding: 12 } },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) { return ctx.label + ': ' + formatCurrency(ctx.parsed || 0); }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    function renderTopItensChart(payload) {
+        const labels = payload.labels || [];
+        const quantidades = payload.quantidades || [];
+        const totais = payload.totais || [];
+
+        if (state.topItensChart) state.topItensChart.destroy();
+
+        if (!labels.length) {
+            document.getElementById('topItensFeedback').innerHTML = '<div class="dash-empty-state">Nenhum item vendido no periodo.</div>';
+            return;
+        }
+
+        state.topItensChart = new Chart(document.getElementById('dashboardTopItensChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Quantidade',
+                    data: quantidades,
+                    backgroundColor: PALETTE.success + 'cc',
+                    borderColor: PALETTE.success,
+                    borderWidth: 1,
+                    borderRadius: 6,
+                    totais: totais
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: CHART_ANIMATION,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) {
+                                const tot = ctx.dataset.totais[ctx.dataIndex] || 0;
+                                return ctx.parsed.x + ' un - ' + formatCurrency(tot);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { color: 'rgba(148,163,184,0.14)' }, ticks: { precision: 0 } },
+                    y: { grid: { display: false } }
+                }
+            }
+        });
+    }
+
+    function renderHoraChart(payload) {
+        const labels = payload.labels || [];
+        const quantidades = payload.quantidades || [];
+        const totais = payload.totais || [];
+
+        if (state.horaChart) state.horaChart.destroy();
+
+        state.horaChart = new Chart(document.getElementById('dashboardHoraChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Vendas',
+                    data: quantidades,
+                    backgroundColor: labels.map(function (_, i) { return PALETTE.warning + (quantidades[i] > 0 ? 'cc' : '33'); }),
+                    borderRadius: 4,
+                    maxBarThickness: 18,
+                    totais: totais
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: CHART_ANIMATION,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function (ctx) {
+                                const tot = ctx.dataset.totais[ctx.dataIndex] || 0;
+                                return ctx.parsed.y + ' vendas - ' + formatCurrency(tot);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: { grid: { color: 'rgba(148,163,184,0.14)' }, ticks: { precision: 0 } },
+                    x: { grid: { display: false }, ticks: { autoSkip: true, maxTicksLimit: 12 } }
                 }
             }
         });
@@ -253,21 +397,22 @@
         const body = document.getElementById('activityBody');
         const page = Number(pagination.page || 1);
         const totalPages = Number(pagination.total_pages || 1);
-
         state.activityPage = page;
 
         if (!items.length) {
-            body.innerHTML = '<tr><td colspan="6"><div class="dash-empty-state">Nenhuma atividade recente encontrada.</div></td></tr>';
+            body.innerHTML = '<tr><td colspan="6"><div class="dash-empty-state">Nenhuma venda encontrada.</div></td></tr>';
         } else {
             body.innerHTML = items.map(function (item) {
                 return [
                     '<tr>',
-                        '<td><span class="dash-badge">', escapeHtml(item.tipo === 'pedido' ? 'Pedido' : 'Servico'), '</span></td>',
-                        '<td><strong>', escapeHtml(item.cliente_nome || 'Sem cliente'), '</strong></td>',
+                        '<td><strong>#', item.numero || '--', '</strong>',
+                            item.origem ? ' <span class="dash-meta">(' + escapeHtml(String(item.origem)) + ')</span>' : '',
+                        '</td>',
+                        '<td>', escapeHtml(item.cliente_nome || 'Consumidor'), '</td>',
+                        '<td>', escapeHtml(item.forma || '--'), '</td>',
                         '<td><span class="', statusClass(item.status), '">', escapeHtml(normalizeStatus(item.status)), '</span></td>',
                         '<td>', formatCurrency(item.valor_total || 0), '</td>',
                         '<td>', escapeHtml(formatDate(item.data_evento)), '</td>',
-                        '<td class="text-end"><a class="btn btn-sm btn-outline-primary" href="', escapeHtml(item.href || '#'), '">Abrir</a></td>',
                     '</tr>'
                 ].join('');
             }).join('');
@@ -278,109 +423,20 @@
         document.getElementById('activityNextBtn').disabled = page >= totalPages;
     }
 
-    function renderActivitySkeleton() {
-        document.getElementById('activityBody').innerHTML = [
-            '<tr><td colspan="6">',
-                '<div class="dashboard-stack">',
-                    '<div class="dash-skeleton-line"></div>',
-                    '<div class="dash-skeleton-line"></div>',
-                    '<div class="dash-skeleton-line"></div>',
-                '</div>',
-            '</td></tr>'
-        ].join('');
-    }
-
-    function renderSparkline(container, values) {
-        if (!container) {
-            return;
-        }
-
-        const points = Array.isArray(values) ? values.map(Number) : [];
-        if (!points.length) {
-            container.innerHTML = '<div class="dash-empty-state">Sem serie</div>';
-            return;
-        }
-
-        const width = 220;
-        const height = 56;
-        const min = Math.min.apply(null, points);
-        const max = Math.max.apply(null, points);
-        const range = max - min || 1;
-        const coordinates = points.map(function (value, index) {
-            const x = (index / Math.max(points.length - 1, 1)) * (width - 8) + 4;
-            const y = height - (((value - min) / range) * (height - 10) + 5);
-            return x.toFixed(2) + ',' + y.toFixed(2);
-        }).join(' ');
-
-        container.innerHTML = [
-            '<svg viewBox="0 0 ', width, ' ', height, '" width="100%" height="', height, '" aria-hidden="true">',
-                '<polyline fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="', coordinates, '"></polyline>',
-            '</svg>'
-        ].join('');
-    }
-
     function renderChange(element, value) {
-        if (!element) {
-            return;
-        }
+        if (!element) return;
         element.className = 'dash-change ' + changeVariant(value);
         element.textContent = (value > 0 ? '+' : '') + value.toFixed(2) + '%';
     }
 
-    function progressRow(label, value, percent, tone) {
-        const barClass = tone === 'success'
-            ? 'dash-progress__bar dash-progress__bar--success'
-            : 'dash-progress__bar dash-progress__bar--warning';
-
-        return [
-            '<div class="dashboard-stack" style="gap:0.45rem;">',
-                '<div class="dash-card__header">',
-                    '<span class="dash-meta">', escapeHtml(label), '</span>',
-                    '<strong>', escapeHtml(value), '</strong>',
-                '</div>',
-                '<div class="dash-progress">',
-                    '<div class="', barClass, '" style="width:', Math.max(0, Math.min(percent, 100)), '%"></div>',
-                '</div>',
-            '</div>'
-        ].join('');
-    }
-
-    function trendRow(label, item) {
-        const value = Number(item && item.variacao_percentual || 0);
-        return [
-            '<div class="dash-list-item">',
-                '<span class="dash-avatar">', escapeHtml(initials(label)), '</span>',
-                '<div>',
-                    '<p class="dash-list-item__title">', escapeHtml(label), '</p>',
-                    '<p class="dash-list-item__meta">', escapeHtml(item && item.referencia ? item.referencia : 'Comparativo do painel'), '</p>',
-                '</div>',
-                '<span class="dash-change ', changeVariant(value), '">', escapeHtml((value > 0 ? '+' : '') + value.toFixed(2) + '%'), '</span>',
-            '</div>'
-        ].join('');
-    }
-
-    function kpiMeta(def, item) {
-        if (def.valueType === 'currency') {
-            return 'Pedidos ' + formatCurrency(item.pedidos || 0) + ' + Servicos ' + formatCurrency(item.servicos || 0);
-        }
-        if (def.label === 'Pedidos do mes') {
-            return formatCurrency(item.valor_financeiro || 0) + ' no periodo';
-        }
-        return item.referencia || 'Atualizado em tempo real';
-    }
-
     function setText(selector, value) {
         const element = typeof selector === 'string' ? document.querySelector(selector) : selector;
-        if (element) {
-            element.textContent = value;
-        }
+        if (element) element.textContent = value;
     }
 
     function showFeedback(id, message, retryHandler) {
         const container = document.getElementById(id);
-        if (!container) {
-            return;
-        }
+        if (!container) return;
         container.innerHTML = [
             '<div class="dash-inline-error">',
                 '<span>', escapeHtml(message), '</span>',
@@ -388,16 +444,12 @@
             '</div>'
         ].join('');
         const button = container.querySelector('[data-feedback-retry]');
-        if (button) {
-            button.addEventListener('click', retryHandler);
-        }
+        if (button) button.addEventListener('click', retryHandler);
     }
 
     function clearFeedback(id) {
         const container = document.getElementById(id);
-        if (container) {
-            container.innerHTML = '';
-        }
+        if (container) container.innerHTML = '';
     }
 
     function setRefreshing(isRefreshing) {
@@ -421,25 +473,21 @@
 
     function statusClass(status) {
         const normalized = String(status || '').toUpperCase();
-        if (['FATURADO', 'PAGO', 'CONCLUIDO', 'APROVADO'].includes(normalized)) return 'dash-status-badge dash-status-badge--success';
-        if (['PENDENTE', 'RASCUNHO'].includes(normalized)) return 'dash-status-badge dash-status-badge--warning';
-        if (['EM_PROCESSO'].includes(normalized)) return 'dash-status-badge dash-status-badge--info';
-        return 'dash-status-badge dash-status-badge--danger';
+        if (['FATURADO', 'PAGO', 'CONCLUIDO'].includes(normalized)) return 'dash-status-badge dash-status-badge--success';
+        if (['RASCUNHO', 'PENDENTE'].includes(normalized)) return 'dash-status-badge dash-status-badge--warning';
+        if (['CANCELADO'].includes(normalized)) return 'dash-status-badge dash-status-badge--danger';
+        return 'dash-status-badge dash-status-badge--info';
     }
 
     function normalizeStatus(status) {
         const map = {
-            RASCUNHO: 'Rascunho',
-            PENDENTE: 'Pendente',
-            EM_PROCESSO: 'Em processo',
-            APROVADO: 'Aprovado',
-            FATURADO: 'Faturado',
-            CONCLUIDO: 'Concluido',
-            CANCELADO: 'Cancelado',
-            PAGO: 'Pago'
+            faturado: 'Faturado',
+            rascunho: 'Rascunho',
+            pendente: 'Pendente',
+            cancelado: 'Cancelado',
+            pago: 'Pago'
         };
-        const normalized = String(status || '').toUpperCase();
-        return map[normalized] || status || '--';
+        return map[String(status || '').toLowerCase()] || status || '--';
     }
 
     function formatInteger(value) {
@@ -462,12 +510,6 @@
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) return value || '--';
         return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    }
-
-    function initials(label) {
-        return String(label || '').split(' ').filter(Boolean).slice(0, 2).map(function (part) {
-            return part.charAt(0).toUpperCase();
-        }).join('');
     }
 
     function escapeHtml(value) {

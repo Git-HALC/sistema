@@ -125,6 +125,7 @@ class ClienteService
             'codigo_municipio' => $codigoMunicipio !== '' ? $codigoMunicipio : null,
             'ie' => trim((string)($dados['ie'] ?? '')) ?: null,
             'ind_ie_dest' => $indIeDest,
+            'prazo_faturamento_dias' => max(0, min(365, (int)($dados['prazo_faturamento_dias'] ?? 0))),
         ];
     }
 

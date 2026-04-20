@@ -117,12 +117,8 @@ final class PdvConferenciaController
         unset($_SESSION['pdv_conferencia_valores']);
         $_SESSION['mensagem'] = [
             'tipo' => 'success',
-            'texto' => sprintf(
-                'Caixa conferido. %d venda(s) processada(s) — %d movimentação(ões), %d conta(s) a receber.',
-                $r['vendas_conferidas'],
-                $r['movimentacoes'],
-                $r['contas_receber']
-            ),
+            'texto' => 'Caixa fechado às cegas. A conferência e os lançamentos financeiros '
+                     . 'serão feitos pelo responsável no módulo Gerencial de Caixas.',
         ];
         header('Location: ' . tenantCleanUrl('pdv/caixa/' . (int)$caixa['id'] . '/relatorio'));
         exit();

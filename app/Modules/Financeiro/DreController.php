@@ -28,7 +28,95 @@ class DreController
             return;
         }
 
+        if (($_GET['export'] ?? '') === 'csv') {
+            $this->exportarCsv();
+            return;
+        }
+
+        if ($action === 'detalhes') {
+            $this->detalhes();
+            return;
+        }
+
         $this->index();
+    }
+
+    private function detalhes(): void
+    {
+        // Limpa qualquer output em buffer (notices/warnings que quebrariam o JSON)
+        while (ob_get_level() > 0) { ob_end_clean(); }
+        ob_start();
+        header('Content-Type: application/json; charset=UTF-8');
+        try {
+            $ini = (string)($_GET['inicio'] ?? date('Y-m-01'));
+            $fim = (string)($_GET['fim'] ?? date('Y-m-t'));
+            $repo = new DreRepository($this->pdo);
+
+            // + por categoria (subitem)
+            if (!empty($_GET['categoria_id'])) {
+                $movs = $repo->movimentacoesPorCategoria(
+                    (int)$_GET['categoria_id'], $ini, $fim
+                );
+                $payload = [
+                    'ok' => true,
+                    'categoria_id' => (int)$_GET['categoria_id'],
+                    'inicio' => $ini,
+                    'fim' => $fim,
+                    'movimentacoes' => $movs,
+                ];
+            } else {
+                $bloco = (string)($_GET['bloco'] ?? '');
+                if ($bloco === '') {
+                    throw new \RuntimeException('informe bloco ou categoria_id.');
+                }
+                $grupos = $repo->detalhesBloco($bloco, $ini, $fim);
+                $payload = [
+                    'ok' => true,
+                    'bloco' => $bloco,
+                    'inicio' => $ini,
+                    'fim' => $fim,
+                    'grupos' => $grupos,
+                ];
+            }
+            ob_end_clean();
+            echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            if (ob_get_level() > 0) { ob_end_clean(); }
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'erro' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        }
+        exit;
+    }
+
+    private function exportarCsv(): void
+    {
+        $ini = isset($_GET['data_inicio']) && $_GET['data_inicio'] !== '' ? (string)$_GET['data_inicio'] : date('Y-m-01');
+        $fim = isset($_GET['data_fim']) && $_GET['data_fim'] !== '' ? (string)$_GET['data_fim'] : date('Y-m-t');
+        $dre = $this->service->gerarPorPeriodo($ini, $fim);
+        $blocos = $dre['blocos'] ?? [];
+        $receitaBruta = (float)($blocos['01_receita_bruta']['valor'] ?? 0);
+
+        $filename = sprintf('DRE_%s_a_%s.csv', $ini, $fim);
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        $out = fopen('php://output', 'w');
+        fprintf($out, chr(0xEF) . chr(0xBB) . chr(0xBF));
+        fputcsv($out, ['Bloco', 'Descricao', 'Valor (R$)', 'Margem %'], ';');
+        foreach ($blocos as $chave => $bloco) {
+            $valor = (float)($bloco['valor'] ?? 0);
+            $margem = $receitaBruta > 0 ? ($valor / $receitaBruta) * 100 : 0;
+            fputcsv($out, [
+                $chave,
+                (string)($bloco['label'] ?? ''),
+                number_format($valor, 2, ',', '.'),
+                number_format($margem, 1, ',', '.') . '%',
+            ], ';');
+            foreach ($bloco['detalhes'] ?? [] as $d) {
+                fputcsv($out, ['  -> ' . $chave, (string)$d['nome'], number_format((float)$d['valor'], 2, ',', '.'), ''], ';');
+            }
+        }
+        fclose($out);
+        exit;
     }
 
     // -------------------------------------------------------------------------

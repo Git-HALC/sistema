@@ -18,7 +18,7 @@ $isAtivo = static fn(string $item): bool => $active === $item;
         </button>
     </div>
 
-    <div class="px-3 pb-2">
+    <div class="px-3 pb-2 sidebar-only-expanded">
         <div class="card border-0 shadow-sm">
             <div class="card-body p-3">
                 <div class="text-uppercase small text-muted mb-1">Caixa ativo</div>
@@ -40,6 +40,25 @@ $isAtivo = static fn(string $item): bool => $active === $item;
             </div>
         <?php endif; ?>
     </div>
+
+    <!-- Indicador compacto do caixa quando sidebar recolhido -->
+    <?php if (is_array($caixaResumo)): ?>
+    <div class="px-2 pb-2 sidebar-only-collapsed text-center">
+        <div class="badge bg-primary bg-opacity-10 text-primary border border-primary-subtle w-100 py-2"
+             title="Caixa #<?php echo (int)($caixaResumo['numero_caixa'] ?? 0); ?> · <?php echo htmlspecialchars((string)($caixaResumo['operador_nome'] ?? '')); ?>">
+            <i class="fas fa-cash-register d-block mb-1"></i>
+            #<?php echo (int)($caixaResumo['numero_caixa'] ?? 0); ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <style>
+        .sidebar-only-collapsed { display: none; }
+        body.sidebar-collapsed .sidebar-only-expanded,
+        #sidebar.collapsed .sidebar-only-expanded { display: none !important; }
+        body.sidebar-collapsed .sidebar-only-collapsed,
+        #sidebar.collapsed .sidebar-only-collapsed { display: block !important; }
+    </style>
 
     <nav class="sidebar-nav">
         <ul class="sidebar-menu">
@@ -64,19 +83,6 @@ $isAtivo = static fn(string $item): bool => $active === $item;
                 </a>
             </li>
 
-            <li class="menu-item">
-                <a href="<?php echo htmlspecialchars($clean('pdv/pedidos?action=kanban')); ?>" class="menu-link <?php echo $isAtivo('pedidos') ? 'active' : ''; ?>" title="Pedidos">
-                    <i class="fas fa-clipboard-list menu-icon"></i>
-                    <span class="menu-text">Pedidos</span>
-                </a>
-            </li>
-
-            <li class="menu-item">
-                <a href="<?php echo htmlspecialchars($clean('pdv/servicos?action=kanban')); ?>" class="menu-link <?php echo $isAtivo('servicos') ? 'active' : ''; ?>" title="Serviços">
-                    <i class="fas fa-tools menu-icon"></i>
-                    <span class="menu-text">Serviços</span>
-                </a>
-            </li>
         </ul>
     </nav>
 

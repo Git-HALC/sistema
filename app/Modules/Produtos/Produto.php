@@ -20,6 +20,8 @@ class Produto
     public float   $estoque_atual  = 0.0;
     public float   $estoque_minimo = 0.0;
     public bool    $ativo          = true;
+    public ?int    $grupo_id       = null;
+    public ?int    $subgrupo_id    = null;
     public string  $created_at     = '';
     public string  $updated_at     = '';
 
@@ -37,6 +39,8 @@ class Produto
         $p->estoque_atual  = (float)($row['estoque_atual']  ?? 0);
         $p->estoque_minimo = (float)($row['estoque_minimo'] ?? 0);
         $p->ativo          = filter_var($row['ativo'] ?? true, FILTER_VALIDATE_BOOLEAN);
+        $p->grupo_id       = isset($row['grupo_id']) && $row['grupo_id'] !== '' ? (int)$row['grupo_id'] : null;
+        $p->subgrupo_id    = isset($row['subgrupo_id']) && $row['subgrupo_id'] !== '' ? (int)$row['subgrupo_id'] : null;
         $p->created_at     = $row['created_at']           ?? '';
         $p->updated_at     = $row['updated_at']           ?? '';
         return $p;
@@ -58,6 +62,8 @@ class Produto
             'estoque_atual'  => $this->estoque_atual,
             'estoque_minimo' => $this->estoque_minimo,
             'ativo'          => $this->ativo,
+            'grupo_id'       => $this->grupo_id,
+            'subgrupo_id'    => $this->subgrupo_id,
         ];
     }
 

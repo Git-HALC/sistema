@@ -134,13 +134,41 @@
                                         </small>
                                     </td>
                                     <td class="text-end">
-                                        <div>R$ <?php echo number_format($conta['valor'], 2, ',', '.'); ?></div>
-                                        <?php 
+                                        <?php
+                                            $valorLiquido = (float)$conta['valor'];
                                             $valorPago = (float)($conta['valor_pago'] ?? 0);
                                             $descontoTotal = (float)($conta['desconto'] ?? 0);
                                             $valorRecebidoLiquido = $valorPago;
-                                            $emAberto = (float)$conta['valor'] - $valorPago - $descontoTotal;
+                                            $emAberto = $valorLiquido - $valorPago - $descontoTotal;
+
+                                            // Extrai taxa aplicada da observacao, se houver
+                                            $taxaInfo = null;
+                                            $valorOriginal = null;
+                                            $obsConta = (string)($conta['observacoes'] ?? '');
+                                            if ($obsConta !== '' && preg_match('/Taxa aplicada:\s*([\d.,]+)%\s*\(R\$\s*([\d.,]+)\)/i', $obsConta, $mTx)) {
+                                                $txPerc = (float)str_replace(',', '.', $mTx[1]);
+                                                $txValor = (float)str_replace(',', '.', $mTx[2]);
+                                                $valorOriginal = round($valorLiquido + $txValor, 2);
+                                                $taxaInfo = [
+                                                    'percentual' => $txPerc,
+                                                    'valor' => $txValor,
+                                                ];
+                                            }
                                         ?>
+                                        <?php if ($taxaInfo !== null): ?>
+                                            <div class="small text-muted">
+                                                Valor bruto: R$ <?php echo number_format($valorOriginal, 2, ',', '.'); ?>
+                                            </div>
+                                            <div class="small text-danger">
+                                                &minus; Taxa <?php echo number_format($taxaInfo['percentual'], 2, ',', '.'); ?>%:
+                                                R$ <?php echo number_format($taxaInfo['valor'], 2, ',', '.'); ?>
+                                            </div>
+                                            <div>
+                                                <strong>Valor liquido: R$ <?php echo number_format($valorLiquido, 2, ',', '.'); ?></strong>
+                                            </div>
+                                        <?php else: ?>
+                                            <div>R$ <?php echo number_format($valorLiquido, 2, ',', '.'); ?></div>
+                                        <?php endif; ?>
                                         <?php if ($emAberto > 0): ?>
                                             <small class="text-muted">Falta: R$ <?php echo number_format($emAberto, 2, ',', '.'); ?></small>
                                         <?php endif; ?>
@@ -190,6 +218,7 @@
                                                 <button type="button" class="btn btn-outline-success btn-baixar"
                                                         data-id="<?php echo $conta['id']; ?>"
                                                         data-valor="<?php echo $conta['valor'] - ($conta['valor_pago'] ?? 0); ?>"
+                                                        data-origem="<?php echo htmlspecialchars((string)($conta['origem'] ?? 'MANUAL')); ?>"
                                                         title="Receber">
                                                     <i class="fas fa-check"></i>
                                                 </button>
@@ -290,10 +319,27 @@
                                         <?php echo htmlspecialchars($stTexto); ?>
                                     </span>
                                 </div>
+                                <?php
+                                    $taxaInfoM = null;
+                                    $valorOriginalM = null;
+                                    $obsContaM = (string)($conta['observacoes'] ?? '');
+                                    if ($obsContaM !== '' && preg_match('/Taxa aplicada:\s*([\d.,]+)%\s*\(R\$\s*([\d.,]+)\)/i', $obsContaM, $mTxM)) {
+                                        $txPercM = (float)str_replace(',', '.', $mTxM[1]);
+                                        $txValorM = (float)str_replace(',', '.', $mTxM[2]);
+                                        $valorOriginalM = round((float)$conta['valor'] + $txValorM, 2);
+                                        $taxaInfoM = ['percentual' => $txPercM, 'valor' => $txValorM];
+                                    }
+                                ?>
                                 <div class="row g-2 mb-3 small">
                                     <div class="col-6">
                                         <span class="text-muted d-block">Valor</span>
-                                        <strong>R$ <?php echo number_format($conta['valor'], 2, ',', '.'); ?></strong>
+                                        <?php if ($taxaInfoM !== null): ?>
+                                            <div class="small text-muted">Bruto: R$ <?php echo number_format($valorOriginalM, 2, ',', '.'); ?></div>
+                                            <div class="small text-danger">&minus;<?php echo number_format($taxaInfoM['percentual'], 2, ',', '.'); ?>%</div>
+                                            <strong>Liquido: R$ <?php echo number_format($conta['valor'], 2, ',', '.'); ?></strong>
+                                        <?php else: ?>
+                                            <strong>R$ <?php echo number_format($conta['valor'], 2, ',', '.'); ?></strong>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="col-6">
                                         <span class="text-muted d-block">Recebido</span>
@@ -493,9 +539,11 @@
                         </select>
                         <small class="text-muted d-block mt-1" id="forma_pagamento_hint">Selecione a forma para validar banco, taxa e adquirente.</small>
                     </div>
-                    <div class="mb-3">
-                        <label for="categoria_dre_id" class="form-label">Categoria DRE (Receita) *</label>
-                        <select class="form-select" id="categoria_dre_id" name="categoria_dre_id" required>
+                    <div class="mb-3" id="categoria_dre_wrapper">
+                        <label for="categoria_dre_id" class="form-label">
+                            Categoria DRE (Receita) <span id="categoria_dre_asterisco">*</span>
+                        </label>
+                        <select class="form-select" id="categoria_dre_id" name="categoria_dre_id">
                             <option value="">Selecione...</option>
                             <?php foreach ($categoriasDreReceita as $cat): ?>
                                 <option value="<?php echo $cat['id']; ?>">
@@ -503,6 +551,10 @@
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <small class="text-muted d-block mt-1" id="categoria_dre_hint">
+                            Obrigatoria apenas para contas manuais. Contas geradas automaticamente
+                            (PDV, adquirente, pedido) ja tem a receita reconhecida na venda.
+                        </small>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -707,6 +759,8 @@ $(document).ready(function () {
     $('.btn-baixar').on('click', function () {
         const id = $(this).data('id');
         const valorEmAberto = parseFloat($(this).data('valor')) || 0;
+        const origem = String($(this).data('origem') || 'MANUAL').toUpperCase();
+        const ehAuto = ['PDV', 'ADQUIRENTE', 'PEDIDO', 'SERVICO'].includes(origem);
 
         $('#baixa_id').val(id);
         $('#valor_recebido').val('').focus();
@@ -714,6 +768,13 @@ $(document).ready(function () {
         $('#forma_pagamento_id').val('');
         $('#valor_original').text('R$ ' + valorEmAberto.toLocaleString('pt-BR', {minimumFractionDigits: 2}));
         $('#valor_em_aberto').text('R$ ' + valorEmAberto.toLocaleString('pt-BR', {minimumFractionDigits: 2})).data('valor', valorEmAberto);
+
+        // Categoria DRE so eh obrigatoria para CR MANUAL. Auto-CR (PDV/ADQUIRENTE/PEDIDO/SERVICO)
+        // ja tem receita reconhecida na venda (R1) — recebimento nao afeta DRE.
+        $('#categoria_dre_id').val('').prop('required', !ehAuto);
+        $('#categoria_dre_asterisco').toggle(!ehAuto);
+        $('#categoria_dre_wrapper').toggle(!ehAuto);
+
         atualizarCalculos();
         $('#modalBaixa').modal('show');
     });

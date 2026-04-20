@@ -36,6 +36,20 @@ final class PdvVendaService
         if ($modo === 'pago_agora' && empty($payload['forma_pagamento_id'])) {
             $erros[] = 'Forma de pagamento obrigatória.';
         }
+
+        // Cliente obrigatório: a faturar (AF) ou modo cobrar_depois
+        $formaTipo = null;
+        if (!empty($payload['forma_pagamento_id'])) {
+            $stmt = $this->pdo->prepare('SELECT tipo FROM formas_pagamento WHERE id = :id');
+            $stmt->execute([':id' => (int)$payload['forma_pagamento_id']]);
+            $formaTipo = $stmt->fetchColumn() ?: null;
+        }
+        $exigeCliente = ($modo === 'cobrar_depois') || ($formaTipo === 'AF');
+        if ($exigeCliente && empty($payload['cliente_id'])) {
+            $erros[] = $modo === 'cobrar_depois'
+                ? 'Selecione o cliente para enviar a venda ao Fluxo (Cobrar Depois).'
+                : 'Selecione o cliente para vendas a faturar.';
+        }
         if (empty($payload['itens']) || !is_array($payload['itens'])) {
             $erros[] = 'Adicione ao menos 1 item.';
         }
@@ -87,6 +101,30 @@ final class PdvVendaService
             return ['ok' => false, 'id' => null, 'numero' => null, 'erros' => $erros];
         }
 
+        // Validacao de estoque para produtos (bloqueia venda sem estoque suficiente)
+        $itensProduto = array_values(array_filter(
+            $itensNormalizados,
+            static fn ($i): bool => $i['tipo_item'] === 'PRODUTO' && !empty($i['produto_id'])
+        ));
+        if ($itensProduto !== []) {
+            $faltantes = $this->repo->verificarEstoque($itensProduto);
+            if ($faltantes !== []) {
+                $msgs = array_map(
+                    static fn ($f): string => sprintf(
+                        '%s: solicitado %s, disponível %s',
+                        $f['nome'],
+                        rtrim(rtrim(number_format($f['solicitado'], 4, '.', ''), '0'), '.'),
+                        rtrim(rtrim(number_format($f['disponivel'], 4, '.', ''), '0'), '.')
+                    ),
+                    $faltantes
+                );
+                return [
+                    'ok' => false, 'id' => null, 'numero' => null,
+                    'erros' => array_merge(['Estoque insuficiente:'], $msgs),
+                ];
+            }
+        }
+
         $descontoTipo = in_array($payload['desconto_tipo'] ?? null, ['VALOR', 'PERCENTUAL'], true)
             ? (string)$payload['desconto_tipo'] : null;
         $descontoValor = max(0.0, (float)($payload['desconto_valor'] ?? 0));
@@ -112,6 +150,18 @@ final class PdvVendaService
             $stmt = $this->pdo->prepare('SELECT numero FROM pdv_vendas WHERE id = :id');
             $stmt->execute([':id' => $id]);
             $numero = (int)$stmt->fetchColumn();
+
+            // Se venda ja nasce faturada (pago_agora), deduz estoque agora
+            if ($venda->status === 'faturado') {
+                foreach ($itensProduto as $ip) {
+                    $this->repo->deduzirEstoque(
+                        (int)$ip['produto_id'],
+                        (float)$ip['quantidade'],
+                        (int)$venda->usuario_id,
+                        $id
+                    );
+                }
+            }
 
             $this->audit->registrar(
                 'pdv',
@@ -155,7 +205,38 @@ final class PdvVendaService
             return ['ok' => false, 'erro' => 'Forma de pagamento obrigatória para faturar.'];
         }
 
+        // Ao mover para faturado: validar + deduzir estoque dos produtos desta venda
+        if ($novoStatus === 'faturado') {
+            $itensProduto = $this->repo->itensProdutoDaVenda($vendaId);
+            if ($itensProduto !== []) {
+                $faltantes = $this->repo->verificarEstoque(
+                    array_map(
+                        static fn ($i) => ['produto_id' => (int)$i['produto_id'], 'quantidade' => (float)$i['quantidade']],
+                        $itensProduto
+                    )
+                );
+                if ($faltantes !== []) {
+                    $msgs = array_map(
+                        static fn ($f) => $f['nome'] . ' (falta ' . ($f['solicitado'] - $f['disponivel']) . ')',
+                        $faltantes
+                    );
+                    return ['ok' => false, 'erro' => 'Estoque insuficiente: ' . implode(' · ', $msgs)];
+                }
+            }
+        }
+
         $r = $this->repo->moverStatus($vendaId, $novoStatus, $formaPagamentoId);
+
+        if ($r['ok'] && $novoStatus === 'faturado') {
+            foreach ($this->repo->itensProdutoDaVenda($vendaId) as $ip) {
+                $this->repo->deduzirEstoque(
+                    (int)$ip['produto_id'],
+                    (float)$ip['quantidade'],
+                    $usuarioId,
+                    $vendaId
+                );
+            }
+        }
         if (!$r['ok']) {
             $erro = match ($r['erro']) {
                 'nao_encontrada' => 'Venda não encontrada.',
@@ -181,27 +262,52 @@ final class PdvVendaService
      */
     public function cancelar(int $vendaId, int $usuarioId, ?string $motivo): array
     {
-        $r = $this->repo->cancelarVenda($vendaId, $usuarioId, $motivo);
-        if (!$r['ok']) {
-            $erro = match ($r['status_caixa']) {
-                'inexistente' => 'Venda não encontrada.',
-                'fechado'     => 'Caixa já fechado — não é possível cancelar esta venda.',
-                'aberto'      => 'Venda já cancelada ou não pôde ser cancelada.',
-                default       => 'Não foi possível cancelar a venda.',
-            };
-            return ['ok' => false, 'erro' => $erro];
+        // Capturar status atual para saber se precisa estornar estoque
+        $venda = $this->repo->findById($vendaId);
+        $precisaEstornar = $venda !== null && $venda->status === 'faturado';
+        $itensProduto = $precisaEstornar ? $this->repo->itensProdutoDaVenda($vendaId) : [];
+
+        try {
+            $this->pdo->beginTransaction();
+
+            $r = $this->repo->cancelarVenda($vendaId, $usuarioId, $motivo);
+            if (!$r['ok']) {
+                $this->pdo->rollBack();
+                $erro = match ($r['status_caixa']) {
+                    'inexistente' => 'Venda não encontrada.',
+                    'fechado'     => 'Caixa já fechado — não é possível cancelar esta venda.',
+                    'aberto'      => 'Venda já cancelada ou não pôde ser cancelada.',
+                    default       => 'Não foi possível cancelar a venda.',
+                };
+                return ['ok' => false, 'erro' => $erro];
+            }
+
+            // Estorno de estoque: só se a venda estava faturada (estoque foi deduzido)
+            if ($precisaEstornar) {
+                foreach ($itensProduto as $ip) {
+                    $this->repo->restaurarEstoque(
+                        (int)$ip['produto_id'],
+                        (float)$ip['quantidade'],
+                        $usuarioId,
+                        $vendaId
+                    );
+                }
+            }
+
+            $this->audit->registrar(
+                'pdv', 'VENDA_CANCELAR', 'pdv_vendas', $vendaId,
+                'Venda PDV cancelada' . ($precisaEstornar ? ' (estoque estornado)' : '.'),
+                ['venda_id' => $vendaId, 'motivo' => $motivo, 'estorno_estoque' => $precisaEstornar]
+            );
+
+            $this->pdo->commit();
+            return ['ok' => true, 'erro' => null];
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            return ['ok' => false, 'erro' => $e->getMessage()];
         }
-
-        $this->audit->registrar(
-            'pdv',
-            'VENDA_CANCELAR',
-            'pdv_vendas',
-            $vendaId,
-            'Venda PDV cancelada.',
-            ['venda_id' => $vendaId, 'motivo' => $motivo]
-        );
-
-        return ['ok' => true, 'erro' => null];
     }
 
     private function aplicarDesconto(float $subtotal, ?string $tipo, float $valor): float

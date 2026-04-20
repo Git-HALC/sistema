@@ -87,7 +87,11 @@ $brl = fn (float $v): string => 'R$ ' . number_format($v, 2, ',', '.');
                                         </a>
                                         <?php if ($s->ativo): ?>
                                             <form method="POST" action="<?php echo htmlspecialchars($baseUrl); ?>"
-                                                  class="d-inline" onsubmit="return confirm('Inativar este serviço?');">
+                                                  class="d-inline js-confirm-form"
+                                                  data-confirm-title="Inativar serviço?"
+                                                  data-confirm-text="<?= htmlspecialchars((string)$s->nome) ?>"
+                                                  data-confirm-icon="warning"
+                                                  data-confirm-btn="Inativar">
                                                 <input type="hidden" name="action" value="inativar">
                                                 <input type="hidden" name="id" value="<?php echo (int)$s->id; ?>">
                                                 <button type="submit" class="btn btn-outline-warning btn-sm" title="Inativar">
@@ -131,3 +135,26 @@ $brl = fn (float $v): string => 'R$ ' . number_format($v, 2, ',', '.');
         </div>
     </div>
 </div>
+
+<script>
+(function () {
+    document.querySelectorAll('.js-confirm-form').forEach(function (form) {
+        form.addEventListener('submit', function (e) {
+            if (form.dataset.confirmed === '1' || typeof Swal === 'undefined') return;
+            e.preventDefault();
+            var icon = form.dataset.confirmIcon || 'question';
+            var confirmClass = icon === 'warning' ? 'btn btn-warning mx-1'
+                              : (icon === 'error' ? 'btn btn-danger mx-1' : 'btn btn-primary mx-1');
+            Swal.fire({
+                title: form.dataset.confirmTitle || 'Confirmar?',
+                text: form.dataset.confirmText || '',
+                icon: icon, showCancelButton: true,
+                confirmButtonText: form.dataset.confirmBtn || 'Confirmar',
+                cancelButtonText: 'Cancelar',
+                buttonsStyling: false,
+                customClass: { confirmButton: confirmClass, cancelButton: 'btn btn-outline-secondary mx-1' }
+            }).then(function (r) { if (r.isConfirmed) { form.dataset.confirmed = '1'; form.submit(); } });
+        });
+    });
+}());
+</script>

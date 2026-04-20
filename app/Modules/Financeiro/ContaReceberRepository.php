@@ -329,6 +329,40 @@ class ContaReceberRepository
                     'origem' => FinanceiroService::ORIGEM_RECEBIMENTO,
                 ]);
 
+                // R2/R5 — Se o CR tem taxa aplicada (cartao auto-gerado), lanca a taxa
+                // como Despesa Financeira no momento do recebimento (afeta_dre=TRUE, afeta_saldo=FALSE).
+                $obsOriginal = (string)($conta['observacoes'] ?? '');
+                if (preg_match('/Taxa aplicada:\s*([\d.,]+)%\s*\(R\$\s*([\d.,]+)\)/i', $obsOriginal, $mTaxa)) {
+                    $valorTaxa = (float)str_replace(',', '.', $mTaxa[2]);
+                    $txPerc = (float)str_replace(',', '.', $mTaxa[1]);
+                    if ($valorTaxa > 0) {
+                        $catTaxa = $this->pdo->query(
+                            "SELECT id FROM categorias_dre WHERE codigo='51' LIMIT 1"
+                        )->fetchColumn();
+                        if ($catTaxa) {
+                            $stmtTaxa = $this->pdo->prepare(
+                                "INSERT INTO movimentacoes
+                                    (conta_id, tipo, valor, data_movimentacao, descricao,
+                                     categoria_dre_id, forma_pagamento_id, conta_receber_id,
+                                     tipo_origem, protegido, afeta_saldo, afeta_dre)
+                                 VALUES
+                                    (:conta, 'Saida', :valor, :dt,
+                                     :desc, :cat, :fp, :cr,
+                                     'TAXA_CARTAO', TRUE, FALSE, TRUE)"
+                            );
+                            $stmtTaxa->execute([
+                                ':conta' => $contaId,
+                                ':valor' => $valorTaxa,
+                                ':dt' => $dataPagamento,
+                                ':desc' => 'Taxa cartao ' . number_format($txPerc, 2, '.', '') . '% — CR #' . $id,
+                                ':cat' => (int)$catTaxa,
+                                ':fp' => $formaPagamentoId,
+                                ':cr' => $id,
+                            ]);
+                        }
+                    }
+                }
+
                 if ($desconto > 0) {
                     $categoriaDescontos = $this->getCategoriDescontosReceber();
                     if ($categoriaDescontos) {
@@ -345,7 +379,7 @@ class ContaReceberRepository
 
                         $stmtDesc = $this->pdo->prepare("
                             UPDATE " . self::TABLE_MOV . "
-                            SET tipo = 'Sa?da', afeta_saldo = FALSE
+                            SET tipo = 'Saida', afeta_saldo = FALSE
                             WHERE conta_receber_id = :conta_receber_id
                               AND forma_pagamento_id = :forma_pagamento_id
                               AND descricao = :descricao
@@ -536,13 +570,6 @@ class ContaReceberRepository
             throw new RuntimeException(
                 'Esta conta a receber foi gerada pelo faturamento de um pedido e n?o pode ser exclu?da manualmente. ' .
                 'Estorne o faturamento no m?dulo de Pedidos para remover esta conta.'
-            );
-        }
-
-        if (!empty($conta['servico_id']) || strtoupper((string)($conta['origem'] ?? '')) === 'SERVICO') {
-            throw new RuntimeException(
-                'Esta conta a receber foi gerada pelo faturamento de um servi?o e n?o pode ser exclu?da manualmente. ' .
-                'Estorne o faturamento no m?dulo de Servi?os para remover esta conta.'
             );
         }
 

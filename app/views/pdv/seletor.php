@@ -32,21 +32,37 @@ $formatarDataHora = static function (?string $valor): string {
     </div>
 
     <?php if ($caixaAtualUsuario !== null): ?>
-        <div class="card border-0 shadow-sm mb-4">
+        <a href="<?= htmlspecialchars(tenantCleanUrl('pdv/caixa/' . (int)($caixaAtualUsuario['id'] ?? 0))) ?>"
+           class="card border-0 shadow-sm mb-4 text-decoration-none text-body border-start border-4 border-success"
+           style="transition: transform .15s, box-shadow .15s;"
+           onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 .5rem 1rem rgba(0,0,0,.1)'"
+           onmouseout="this.style.transform=''; this.style.boxShadow=''">
             <div class="card-body">
                 <div class="row g-3 align-items-center">
-                    <div class="col-md-8">
-                        <div class="text-uppercase small text-muted mb-1">Meu caixa aberto</div>
-                        <div class="h4 mb-1">Caixa #<?= (int)($caixaAtualUsuario['numero_caixa'] ?? 0) ?></div>
-                        <div class="text-muted">Aberto em <?= htmlspecialchars($formatarDataHora($caixaAtualUsuario['data_abertura'] ?? null)) ?></div>
+                    <div class="col-md-8 d-flex align-items-center gap-3">
+                        <div class="d-flex align-items-center justify-content-center rounded bg-success bg-opacity-10 text-success"
+                             style="width:56px; height:56px;">
+                            <i class="fas fa-cash-register fa-2x"></i>
+                        </div>
+                        <div>
+                            <div class="small text-muted fw-semibold text-uppercase">Meu caixa aberto</div>
+                            <div class="h4 mb-1">Caixa #<?= (int)($caixaAtualUsuario['numero_caixa'] ?? 0) ?></div>
+                            <div class="small text-muted">
+                                <i class="fas fa-clock me-1"></i>
+                                Aberto em <?= htmlspecialchars($formatarDataHora($caixaAtualUsuario['data_abertura'] ?? null)) ?>
+                            </div>
+                        </div>
                     </div>
                     <div class="col-md-4 text-md-end">
                         <div class="text-muted small">Suprimento inicial</div>
                         <div class="fs-5 fw-semibold">R$ <?= number_format((float)($caixaAtualUsuario['valor_suprimento'] ?? 0), 2, ',', '.') ?></div>
+                        <div class="small text-success mt-1">
+                            <i class="fas fa-arrow-right me-1"></i>Ir para meu caixa
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </a>
     <?php endif; ?>
 
     <div class="card border-0 shadow-sm">

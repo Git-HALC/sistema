@@ -27,6 +27,7 @@ class Cliente
     public ?string $codigoMunicipio = null;
     public ?string $ie            = null;
     public string  $indIeDest     = '9';
+    public int     $prazoFaturamentoDias = 0;
     public bool    $ativo         = true;
     public string  $createdAt     = '';
     public string  $updatedAt     = '';
@@ -55,6 +56,7 @@ class Cliente
         $c->codigoMunicipio = $row['codigo_municipio']    ?? null;
         $c->ie           = $row['ie']                     ?? null;
         $c->indIeDest    = (string)($row['ind_ie_dest']   ?? '9');
+        $c->prazoFaturamentoDias = (int)($row['prazo_faturamento_dias'] ?? 0);
         $c->ativo        = (bool)  ($row['ativo']         ?? true);
         $c->createdAt    = $row['created_at']             ?? '';
         $c->updatedAt    = $row['updated_at']             ?? '';
@@ -113,6 +115,7 @@ class Cliente
             'codigo_municipio' => $this->codigoMunicipio,
             'ie' => $this->ie,
             'ind_ie_dest' => $this->indIeDest,
+            'prazo_faturamento_dias' => $this->prazoFaturamentoDias,
             'ativo'     => $this->ativo,
         ];
     }

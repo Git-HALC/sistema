@@ -145,7 +145,7 @@ foreach ($formas as $fp) {
                 <li>Tudo ocorre em <strong>uma única transação</strong>: se algo falhar, nada é gravado.</li>
             </ul>
             <form method="POST" action="<?= htmlspecialchars($confirmUrl) ?>" class="d-flex justify-content-between gap-2" id="formConfirmar">
-                <input type="hidden" name="_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                 <a href="<?= htmlspecialchars($step1Url) ?>" class="btn btn-outline-secondary">
                     <i class="fas fa-arrow-left me-1"></i> Voltar
                 </a>

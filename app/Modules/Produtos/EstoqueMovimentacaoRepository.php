@@ -23,12 +23,12 @@ class EstoqueMovimentacaoRepository
     ): void {
         $tipo = strtoupper(trim($tipo));
         if (!in_array($tipo, ['ENTRADA', 'SAIDA'], true)) {
-            throw new RuntimeException('Tipo de movimentação de estoque inválido.');
+            throw new RuntimeException('Tipo de movimentaï¿½ï¿½o de estoque invï¿½lido.');
         }
 
         $quantidade = round($quantidade, 4);
         if ($quantidade <= 0) {
-            throw new RuntimeException('Quantidade de movimentação deve ser maior que zero.');
+            throw new RuntimeException('Quantidade de movimentaï¿½ï¿½o deve ser maior que zero.');
         }
 
         $stmtProduto = $this->pdo->prepare('
@@ -41,12 +41,12 @@ class EstoqueMovimentacaoRepository
         $produto = $stmtProduto->fetch(PDO::FETCH_ASSOC) ?: null;
 
         if ($produto === null) {
-            throw new RuntimeException("Produto ID {$produtoId} não encontrado para movimentação de estoque.");
+            throw new RuntimeException("Produto ID {$produtoId} nï¿½o encontrado para movimentaï¿½ï¿½o de estoque.");
         }
 
         $ativo = filter_var($produto['ativo'] ?? false, FILTER_VALIDATE_BOOLEAN);
         if (!$ativo) {
-            throw new RuntimeException('Produto "' . $produto['nome'] . '" está inativo e não pode ter estoque movimentado.');
+            throw new RuntimeException('Produto "' . $produto['nome'] . '" estï¿½ inativo e nï¿½o pode ter estoque movimentado.');
         }
 
         $estoqueAnterior = (float) $produto['estoque_atual'];
@@ -57,8 +57,8 @@ class EstoqueMovimentacaoRepository
         if ($estoquePosterior < 0) {
             throw new RuntimeException(
                 'Estoque insuficiente para o produto "' . $produto['nome'] . '". ' .
-                'Disponível: ' . number_format($estoqueAnterior, 4, ',', '.') .
-                ' | Necessário: ' . number_format($quantidade, 4, ',', '.')
+                'Disponï¿½vel: ' . number_format($estoqueAnterior, 4, ',', '.') .
+                ' | Necessï¿½rio: ' . number_format($quantidade, 4, ',', '.')
             );
         }
 
@@ -137,6 +137,8 @@ class EstoqueMovimentacaoRepository
 
         $where = $condicoes ? ('WHERE ' . implode(' AND ', $condicoes)) : '';
 
+        // Referencias legadas (PEDIDO / SERVICO) foram removidas na Fase 1 da auditoria.
+        // Fonte atual: pdv_vendas (tipo_ref = 'VENDA_PDV').
         $sql = <<<SQL
             SELECT
                 m.id,
@@ -145,28 +147,17 @@ class EstoqueMovimentacaoRepository
                 p.nome,
                 p.unidade,
                 m.tipo,
-                CASE
-                    WHEN srv.servico_nome IS NOT NULL THEN 'SERVICO'
-                    ELSE m.origem
-                END AS origem,
+                m.origem,
                 m.referencia_tipo,
                 m.referencia_id,
                 m.quantidade,
                 m.estoque_anterior,
                 m.estoque_posterior,
                 CASE
-                    WHEN srv.servico_nome IS NOT NULL AND ped.numero IS NOT NULL AND m.tipo = 'SAIDA'
-                        THEN 'Saida automatica vinculada ao servico "' || srv.servico_nome || '" via pedido "' || ped.numero || '".'
-                    WHEN srv.servico_nome IS NOT NULL AND ped.numero IS NOT NULL AND m.tipo = 'ENTRADA'
-                        THEN 'Estorno do servico "' || srv.servico_nome || '" via pedido "' || ped.numero || '".'
-                    WHEN m.referencia_tipo = 'SERVICO' AND srv.servico_nome IS NOT NULL AND m.tipo = 'SAIDA'
-                        THEN 'Saida automatica vinculada ao servico "' || srv.servico_nome || '".'
-                    WHEN m.referencia_tipo = 'SERVICO' AND srv.servico_nome IS NOT NULL AND m.tipo = 'ENTRADA'
-                        THEN 'Estorno do servico "' || srv.servico_nome || '".'
-                    WHEN m.referencia_tipo = 'PEDIDO' AND ped.numero IS NOT NULL AND m.tipo = 'SAIDA'
-                        THEN 'Saida automatica vinculada ao pedido "' || ped.numero || '".'
-                    WHEN m.referencia_tipo = 'PEDIDO' AND ped.numero IS NOT NULL AND m.tipo = 'ENTRADA'
-                        THEN 'Estorno do pedido "' || ped.numero || '".'
+                    WHEN m.referencia_tipo = 'VENDA_PDV' AND v.numero IS NOT NULL AND m.tipo = 'SAIDA'
+                        THEN 'Saida automatica vinculada a venda PDV #' || v.numero || '.'
+                    WHEN m.referencia_tipo = 'VENDA_PDV' AND v.numero IS NOT NULL AND m.tipo = 'ENTRADA'
+                        THEN 'Estorno da venda PDV #' || v.numero || '.'
                     ELSE m.observacao
                 END AS observacao,
                 m.created_at,
@@ -174,18 +165,10 @@ class EstoqueMovimentacaoRepository
             FROM produto_estoque_movimentacoes m
             INNER JOIN produtos p ON p.id = m.produto_id
             LEFT JOIN usuarios u ON u.id = m.usuario_id
-            LEFT JOIN pedidos ped ON ped.id::text = m.referencia_id AND m.referencia_tipo = 'PEDIDO'
-            LEFT JOIN LATERAL (
-                SELECT s.id, s.numero, s.servico_nome
-                FROM servicos s
-                WHERE s.ativo = TRUE
-                  AND (
-                    (m.referencia_tipo = 'SERVICO' AND s.id::text = m.referencia_id)
-                    OR (m.referencia_tipo = 'PEDIDO' AND ped.orcamento_id IS NOT NULL AND s.orcamento_id = ped.orcamento_id)
-                  )
-                ORDER BY s.created_at DESC
-                LIMIT 1
-            ) srv ON TRUE
+            LEFT JOIN pdv_vendas v
+                   ON m.referencia_tipo = 'VENDA_PDV'
+                  AND m.referencia_id ~ '^[0-9]+\$'
+                  AND v.id = m.referencia_id::integer
             {$where}
             ORDER BY m.created_at DESC, m.id DESC
         SQL;

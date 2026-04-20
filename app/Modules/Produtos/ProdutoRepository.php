@@ -29,10 +29,12 @@ class ProdutoRepository
     {
         $sql = "INSERT INTO {$this->table}
                     (codigo, nome, descricao, unidade,
-                     preco_custo, preco_venda, estoque_atual, estoque_minimo, ativo)
+                     preco_custo, preco_venda, estoque_atual, estoque_minimo, ativo,
+                     grupo_id, subgrupo_id)
                 VALUES
                     (:codigo, :nome, :descricao, :unidade,
-                     :preco_custo, :preco_venda, :estoque_atual, :estoque_minimo, :ativo)";
+                     :preco_custo, :preco_venda, :estoque_atual, :estoque_minimo, :ativo,
+                     :grupo_id, :subgrupo_id)";
 
         $this->pdo->prepare($sql)->execute($this->bind($produto));
 
@@ -52,6 +54,8 @@ class ProdutoRepository
                     estoque_atual  = :estoque_atual,
                     estoque_minimo = :estoque_minimo,
                     ativo          = :ativo,
+                    grupo_id       = :grupo_id,
+                    subgrupo_id    = :subgrupo_id,
                     updated_at     = NOW()
                 WHERE id = :id";
 
@@ -193,6 +197,8 @@ class ProdutoRepository
             ':estoque_atual'  => $p->estoque_atual,
             ':estoque_minimo' => $p->estoque_minimo,
             ':ativo'          => $p->ativo ? 'true' : 'false',
+            ':grupo_id'       => $p->grupo_id,
+            ':subgrupo_id'    => $p->subgrupo_id,
         ];
     }
 }

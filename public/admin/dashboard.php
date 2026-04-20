@@ -50,12 +50,16 @@ $config = [
         'kpis' => dashboardPublicApiUrl('dashboard/kpis'),
         'faturamento' => dashboardPublicApiUrl('dashboard/faturamento'),
         'atividade' => dashboardPublicApiUrl('dashboard/atividade-recente'),
+        'topItens' => dashboardPublicApiUrl('dashboard/top-itens'),
+        'formasPagamento' => dashboardPublicApiUrl('dashboard/formas-pagamento'),
+        'vendasHora' => dashboardPublicApiUrl('dashboard/vendas-hora'),
     ],
     'links' => [
         'clientes' => tenantUrl('admin/clientes.php'),
-        'pedidos' => tenantUrl('admin/pedidos.php?action=listar'),
-        'servicos' => tenantUrl('admin/servicos.php?action=kanban'),
+        'vendas' => tenantUrl('admin/relatorios/financeiros/relatorio_vendas_pdv.php'),
+        'produtos' => tenantUrl('admin/produtos.php'),
         'financeiro' => tenantUrl('admin/financeiro/dashboard.php'),
+        'pdv' => tenantUrl('pdv'),
     ],
 ];
 
@@ -67,8 +71,8 @@ $dashboardJsVersion = @filemtime(__DIR__ . '/../../assets/js/dashboard-geral.js'
         <div class="dashboard-toolbar__group">
             <div>
                 <p class="dash-overline">Dashboard Geral</p>
-                <h1 class="dash-title">Operacao, faturamento e atividade recente</h1>
-                <p class="dash-subtitle">A tela agora consome os endpoints seguros da ETAPA 3.</p>
+                <h1 class="dash-title">Operacao, vendas e estoque</h1>
+                <p class="dash-subtitle">Dados em tempo real do PDV, faturamento consolidado do mes e alertas de estoque.</p>
             </div>
             <span class="dash-badge"><i class="fas fa-wave-square"></i>Live</span>
         </div>
@@ -79,7 +83,7 @@ $dashboardJsVersion = @filemtime(__DIR__ . '/../../assets/js/dashboard-geral.js'
                 <i class="fas fa-rotate-right me-1"></i>Atualizar
             </button>
             <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars($config['links']['financeiro']); ?>">
-                <i class="fas fa-chart-pie me-1"></i>Ir para o financeiro
+                <i class="fas fa-chart-pie me-1"></i>Dashboard financeiro
             </a>
         </div>
     </div>
@@ -91,20 +95,19 @@ $dashboardJsVersion = @filemtime(__DIR__ . '/../../assets/js/dashboard-geral.js'
             <div class="dash-card__header">
                 <div>
                     <p class="dash-overline">Serie Temporal</p>
-                    <h2 class="dash-title">Faturamento por periodo</h2>
-                    <p class="dash-subtitle" id="chartSubtitle">Pedidos e servicos faturados no intervalo selecionado.</p>
+                    <h2 class="dash-title">Vendas por periodo</h2>
+                    <p class="dash-subtitle" id="chartSubtitle">Total de vendas PDV no intervalo selecionado.</p>
                 </div>
 
                 <div class="dash-filter-group" id="chartFilterGroup">
                     <button type="button" class="dash-filter-btn" data-period="7D">7D</button>
                     <button type="button" class="dash-filter-btn is-active" data-period="30D">30D</button>
                     <button type="button" class="dash-filter-btn" data-period="90D">90D</button>
-                    <button type="button" class="dash-filter-btn" data-period="12M">12M</button>
                 </div>
             </div>
             <div id="chartFeedback"></div>
             <div class="dash-chart-frame">
-                <canvas id="dashboardFaturamentoChart" aria-label="Grafico de faturamento"></canvas>
+                <canvas id="dashboardVendasChart" aria-label="Grafico de vendas por dia"></canvas>
             </div>
         </article>
 
@@ -112,13 +115,46 @@ $dashboardJsVersion = @filemtime(__DIR__ . '/../../assets/js/dashboard-geral.js'
             <article class="dash-card">
                 <div class="dash-card__header">
                     <div>
-                        <p class="dash-overline">Radar</p>
-                        <h2 class="dash-title">Composicao e tendencia</h2>
+                        <p class="dash-overline">Mix</p>
+                        <h2 class="dash-title">Formas de pagamento</h2>
                     </div>
                 </div>
-                <div id="insightsPanel"></div>
+                <div id="formasPagamentoFeedback"></div>
+                <div class="dash-chart-frame dash-chart-frame--sm">
+                    <canvas id="dashboardFormasChart" aria-label="Grafico de formas de pagamento"></canvas>
+                </div>
             </article>
         </aside>
+    </section>
+
+    <section class="dashboard-grid dashboard-grid--two">
+        <article class="dash-card">
+            <div class="dash-card__header">
+                <div>
+                    <p class="dash-overline">Ranking</p>
+                    <h2 class="dash-title">Top 5 itens vendidos</h2>
+                    <p class="dash-subtitle">Produtos e servicos com maior quantidade no periodo.</p>
+                </div>
+            </div>
+            <div id="topItensFeedback"></div>
+            <div class="dash-chart-frame dash-chart-frame--sm">
+                <canvas id="dashboardTopItensChart" aria-label="Grafico top itens"></canvas>
+            </div>
+        </article>
+
+        <article class="dash-card">
+            <div class="dash-card__header">
+                <div>
+                    <p class="dash-overline">Padrao</p>
+                    <h2 class="dash-title">Vendas por hora</h2>
+                    <p class="dash-subtitle">Distribuicao das vendas PDV ao longo do dia.</p>
+                </div>
+            </div>
+            <div id="vendasHoraFeedback"></div>
+            <div class="dash-chart-frame dash-chart-frame--sm">
+                <canvas id="dashboardHoraChart" aria-label="Grafico de vendas por hora"></canvas>
+            </div>
+        </article>
     </section>
 
     <section class="dashboard-grid">
@@ -126,8 +162,8 @@ $dashboardJsVersion = @filemtime(__DIR__ . '/../../assets/js/dashboard-geral.js'
             <div class="dash-card__header">
                 <div>
                     <p class="dash-overline">Timeline</p>
-                    <h2 class="dash-title">Atividade recente</h2>
-                    <p class="dash-subtitle">Pedidos e servicos mais recentes em uma unica fila operacional.</p>
+                    <h2 class="dash-title">Ultimas vendas PDV</h2>
+                    <p class="dash-subtitle">Fila operacional com cliente, forma e status.</p>
                 </div>
 
                 <div class="dashboard-toolbar__group">
@@ -141,12 +177,12 @@ $dashboardJsVersion = @filemtime(__DIR__ . '/../../assets/js/dashboard-geral.js'
                 <table class="dash-table">
                     <thead>
                         <tr>
-                            <th>Tipo</th>
+                            <th>Numero</th>
                             <th>Cliente</th>
+                            <th>Forma</th>
                             <th>Status</th>
                             <th>Valor</th>
                             <th>Data</th>
-                            <th></th>
                         </tr>
                     </thead>
                     <tbody id="activityBody"></tbody>

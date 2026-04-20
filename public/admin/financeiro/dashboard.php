@@ -43,47 +43,28 @@ if (isset($db) && $db instanceof PDO) {
 }
 PermissionGate::require('financeiro');
 
-$currentYear = (int)date('Y');
-$yearOptions = range($currentYear - 2, $currentYear);
-rsort($yearOptions);
-$meses = [
-    1 => 'Janeiro',
-    2 => 'Fevereiro',
-    3 => 'Marco',
-    4 => 'Abril',
-    5 => 'Maio',
-    6 => 'Junho',
-    7 => 'Julho',
-    8 => 'Agosto',
-    9 => 'Setembro',
-    10 => 'Outubro',
-    11 => 'Novembro',
-    12 => 'Dezembro',
-];
-
 $config = [
     'api' => [
         'kpis' => dashboardPublicApiUrl('financeiro/dashboard/kpis'),
-        'fluxo' => dashboardPublicApiUrl('financeiro/dashboard/receitas-despesas'),
-        'heatmap' => dashboardPublicApiUrl('financeiro/dashboard/heatmap'),
+        'fluxoSemanal' => dashboardPublicApiUrl('financeiro/dashboard/fluxo-semanal'),
+        'crVencimento' => dashboardPublicApiUrl('financeiro/dashboard/cr-vencimento'),
+        'porCategoria' => dashboardPublicApiUrl('financeiro/dashboard/por-categoria'),
+        'saldoContas' => dashboardPublicApiUrl('financeiro/dashboard/saldo-contas'),
+        'cpVencimento' => dashboardPublicApiUrl('financeiro/dashboard/cp-vencimento'),
+        'ultimosLancamentos' => dashboardPublicApiUrl('financeiro/dashboard/ultimos-lancamentos'),
+        'recebimentosForma' => dashboardPublicApiUrl('financeiro/dashboard/recebimentos-forma'),
         'filas' => dashboardPublicApiUrl('financeiro/contas/pagar-receber'),
     ],
     'links' => [
         'geral' => tenantUrl('admin/dashboard.php'),
-        'contas' => tenantUrl('admin/financeiro/contas.php'),
         'contas_receber' => tenantUrl('admin/financeiro/contas-receber.php'),
         'contas_pagar' => tenantUrl('admin/financeiro/contas-pagar.php'),
-        'formas_pagamento' => tenantUrl('admin/financeiro/formas-pagamento.php'),
-        'categorias' => tenantUrl('admin/financeiro/categorias-dre.php'),
         'dre' => tenantUrl('admin/financeiro/dre.php'),
         'movimentacoes' => tenantUrl('admin/financeiro/movimentacoes.php'),
+        'fluxo_projetado' => tenantUrl('admin/financeiro/fluxo-caixa-projetado.php'),
     ],
     'csrfToken' => CsrfProtection::token(),
     'defaultLimit' => 8,
-    'currentYear' => $currentYear,
-    'defaultChartYear' => $currentYear,
-    'defaultChartMonth' => null,
-    'yearOptions' => array_values(array_map('intval', $yearOptions)),
 ];
 
 $dashboardJsVersion = @filemtime(__DIR__ . '/../../../assets/js/dashboard-financeiro.js') ?: time();
@@ -97,7 +78,8 @@ include '../../includes/header.php';
         <div class="dashboard-toolbar__group">
             <div>
                 <p class="dash-overline">Dashboard Financeiro</p>
-                <h1 class="dash-title">Fluxo, inadimplencia e filas operacionais</h1>
+                <h1 class="dash-title">Fluxo, DRE resumido e filas operacionais</h1>
+                <p class="dash-subtitle">Numeros reais do periodo: movimentacoes, contas e caixas conferidos.</p>
             </div>
             <span class="dash-badge"><i class="fas fa-wallet"></i>Financeiro live</span>
         </div>
@@ -111,98 +93,41 @@ include '../../includes/header.php';
                 <i class="fas fa-gauge-high me-1"></i>Dashboard geral
             </a>
             <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars($config['links']['dre']); ?>">
-                <i class="fas fa-chart-pie me-1"></i>DRE
+                <i class="fas fa-chart-pie me-1"></i>DRE completa
             </a>
         </div>
     </div>
 
     <section class="dashboard-grid dashboard-grid--kpi" id="financeKpiGrid"></section>
 
-    <section class="dashboard-grid dashboard-grid--two">
+    <section class="dashboard-grid dashboard-grid--aside">
         <article class="dash-card">
             <div class="dash-card__header">
                 <div>
-                    <p class="dash-overline">Radar</p>
-                    <h2 class="dash-title">Resumo do periodo</h2>
-                </div>
-                <a class="btn btn-outline-secondary btn-sm" href="<?php echo htmlspecialchars($config['links']['movimentacoes']); ?>">
-                    <i class="fas fa-list me-1"></i>Movimentacoes
-                </a>
-            </div>
-            <div id="financeSummaryPanel"></div>
-        </article>
-
-        <article class="dash-card">
-            <div class="dash-card__header">
-                <div>
-                    <p class="dash-overline">Base Operacional</p>
-                    <h2 class="dash-title">Contas e configuracoes</h2>
+                    <p class="dash-overline">Fluxo do Caixa</p>
+                    <h2 class="dash-title">Receitas x Despesas (semanal)</h2>
+                    <p class="dash-subtitle">Entradas e saidas efetivas nos bancos do periodo.</p>
                 </div>
             </div>
-            <div id="financeAccountsPanel"></div>
-        </article>
-    </section>
-
-    <section class="dashboard-grid">
-        <article class="dash-card">
-            <div class="dash-card__header">
-                <div>
-                    <p class="dash-overline">Heatmap</p>
-                    <h2 class="dash-title">Atividade diaria do financeiro</h2>
-                    <p class="dash-subtitle">Leitura anual do volume movimentado por dia.</p>
-                </div>
-
-                <div class="dashboard-toolbar__group">
-                    <label class="dash-meta" for="financeHeatmapYear">Ano</label>
-                    <select class="form-select form-select-sm" id="financeHeatmapYear" style="min-width: 7rem;">
-                        <?php foreach ($config['yearOptions'] as $yearOption): ?>
-                            <option value="<?php echo (int)$yearOption; ?>" <?php echo $yearOption === $config['currentYear'] ? 'selected' : ''; ?>>
-                                <?php echo (int)$yearOption; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-            </div>
-            <div id="financeHeatmapFeedback"></div>
-            <div id="financeHeatmapPanel"></div>
-        </article>
-    </section>
-
-    <section class="dashboard-grid">
-        <article class="dash-card">
-            <div class="dash-card__header">
-                <div>
-                    <p class="dash-overline">Fluxo</p>
-                    <h2 class="dash-title">Receitas, despesas e lucro</h2>
-                    <p class="dash-subtitle" id="financeChartSubtitle">Movimentacao por ano ou por mes dentro do ano selecionado.</p>
-                </div>
-
-                <div class="dashboard-toolbar__group">
-                    <label class="dash-meta" for="financeChartMonth">Mes</label>
-                    <select class="form-select form-select-sm" id="financeChartMonth" style="min-width: 10rem;">
-                        <option value="">Ano inteiro</option>
-                        <?php foreach ($meses as $mesNumero => $mesLabel): ?>
-                            <option value="<?php echo (int)$mesNumero; ?>">
-                                <?php echo htmlspecialchars($mesLabel); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-
-                    <label class="dash-meta" for="financeChartYear">Ano</label>
-                    <select class="form-select form-select-sm" id="financeChartYear" style="min-width: 7rem;">
-                        <?php foreach ($config['yearOptions'] as $yearOption): ?>
-                            <option value="<?php echo (int)$yearOption; ?>" <?php echo $yearOption === $config['defaultChartYear'] ? 'selected' : ''; ?>>
-                                <?php echo (int)$yearOption; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-            </div>
-            <div id="financeChartFeedback"></div>
-            <div class="dash-chart-frame dash-chart-frame--sm">
-                <canvas id="financeFluxoChart" aria-label="Grafico de fluxo financeiro"></canvas>
+            <div id="fluxoSemanalFeedback"></div>
+            <div class="dash-chart-frame">
+                <canvas id="financeFluxoChart" aria-label="Grafico de fluxo semanal"></canvas>
             </div>
         </article>
+
+        <aside class="dashboard-stack">
+            <article class="dash-card">
+                <div class="dash-card__header">
+                    <div>
+                        <p class="dash-overline">Recebimentos</p>
+                        <h2 class="dash-title">Por forma de pagamento</h2>
+                        <p class="dash-subtitle">Dinheiro / cartao / PIX / outros. Apenas visibilidade operacional, nao compoe o DRE.</p>
+                    </div>
+                </div>
+                <div id="recebimentosFormaFeedback"></div>
+                <div id="recebimentosFormaPanel"></div>
+            </article>
+        </aside>
     </section>
 
     <section class="dashboard-grid dashboard-grid--two">
@@ -210,57 +135,97 @@ include '../../includes/header.php';
             <div class="dash-card__header">
                 <div>
                     <p class="dash-overline">Fila de Recebimento</p>
-                    <h2 class="dash-title">Contas a receber em aberto</h2>
-                    <p class="dash-subtitle">Baixa rapida com validacao de forma de pagamento e categoria.</p>
+                    <h2 class="dash-title">CR por vencimento</h2>
+                    <p class="dash-subtitle">Distribuicao dos titulos em aberto.</p>
                 </div>
                 <a class="btn btn-outline-secondary btn-sm" href="<?php echo htmlspecialchars($config['links']['contas_receber']); ?>">
                     <i class="fas fa-arrow-up-right-from-square me-1"></i>Abrir modulo
                 </a>
             </div>
-            <div id="financeReceberFeedback"></div>
-            <div class="dash-list" id="financeReceberList"></div>
+            <div id="crVencimentoFeedback"></div>
+            <div class="dash-chart-frame dash-chart-frame--sm">
+                <canvas id="financeCrChart" aria-label="Grafico CR por vencimento"></canvas>
+            </div>
         </article>
 
         <article class="dash-card">
             <div class="dash-card__header">
                 <div>
+                    <p class="dash-overline">Receitas</p>
+                    <h2 class="dash-title">Top categorias do mes</h2>
+                </div>
+            </div>
+            <div id="receitasCatFeedback"></div>
+            <div class="dash-chart-frame dash-chart-frame--sm">
+                <canvas id="financeReceitasCatChart" aria-label="Grafico receitas por categoria"></canvas>
+            </div>
+        </article>
+    </section>
+
+    <section class="dashboard-grid">
+        <article class="dash-card">
+            <div class="dash-card__header">
+                <div>
+                    <p class="dash-overline">Despesas</p>
+                    <h2 class="dash-title">Top categorias do mes</h2>
+                    <p class="dash-subtitle">Inclui CPV, despesa operacional/financeira e tributos.</p>
+                </div>
+            </div>
+            <div id="despesasCatFeedback"></div>
+            <div class="dash-chart-frame dash-chart-frame--sm">
+                <canvas id="financeDespesasCatChart" aria-label="Grafico despesas por categoria"></canvas>
+            </div>
+        </article>
+    </section>
+
+
+    <section class="dashboard-grid dashboard-grid--two">
+        <article class="dash-card">
+            <div class="dash-card__header">
+                <div>
                     <p class="dash-overline">Fila de Pagamento</p>
-                    <h2 class="dash-title">Contas a pagar em aberto</h2>
-                    <p class="dash-subtitle">Baixa rapida com conta bancaria e categoria de despesa.</p>
+                    <h2 class="dash-title">CP por vencimento</h2>
+                    <p class="dash-subtitle">Contas a pagar em aberto ate 30 dias.</p>
                 </div>
                 <a class="btn btn-outline-secondary btn-sm" href="<?php echo htmlspecialchars($config['links']['contas_pagar']); ?>">
                     <i class="fas fa-arrow-up-right-from-square me-1"></i>Abrir modulo
                 </a>
             </div>
-            <div id="financePagarFeedback"></div>
-            <div class="dash-list" id="financePagarList"></div>
+            <div id="cpVencimentoFeedback"></div>
+            <div class="dash-chart-frame dash-chart-frame--sm">
+                <canvas id="financeCpChart" aria-label="Grafico CP por vencimento"></canvas>
+            </div>
+        </article>
+
+        <article class="dash-card">
+            <div class="dash-card__header">
+                <div>
+                    <p class="dash-overline">Timeline</p>
+                    <h2 class="dash-title">Ultimos lancamentos</h2>
+                    <p class="dash-subtitle">Movimentacoes mais recentes do financeiro.</p>
+                </div>
+                <a class="btn btn-outline-secondary btn-sm" href="<?php echo htmlspecialchars($config['links']['movimentacoes']); ?>">
+                    <i class="fas fa-list me-1"></i>Ver todas
+                </a>
+            </div>
+            <div id="ultimosLancamentosFeedback"></div>
+            <div class="dash-table-wrap">
+                <table class="dash-table">
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th>Descricao</th>
+                            <th>Conta</th>
+                            <th>Categoria</th>
+                            <th>Valor</th>
+                            <th>Data</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ultimosLancamentosBody"></tbody>
+                </table>
+            </div>
         </article>
     </section>
-</div>
-
-<div class="modal fade" id="financeQuickActionModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <div>
-                    <p class="dash-overline mb-1" id="financeQuickActionEyebrow">Baixa rapida</p>
-                    <h2 class="h5 mb-0" id="financeQuickActionTitle">Atualizar conta</h2>
-                </div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
-            </div>
-            <form id="financeQuickActionForm">
-                <div class="modal-body">
-                    <div id="financeQuickActionNotice" class="mb-3"></div>
-                    <div class="dash-modal-summary" id="financeQuickActionSummary"></div>
-                    <div class="row g-3 mt-1" id="financeQuickActionFields"></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary" id="financeQuickActionSubmit">Confirmar</button>
-                </div>
-            </form>
-        </div>
-    </div>
 </div>
 
 <script>

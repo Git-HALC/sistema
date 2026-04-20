@@ -11,7 +11,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
 ?>
 <div class="container-fluid">
 
-    <!-- Cabe?alho -->
+    <!-- Cabeçalho -->
     <div class="d-flex justify-content-between align-items-center mt-3 mb-3">
         <h1 class="h3 mb-0"><?php echo htmlspecialchars($page_title); ?></h1>
         <a href="<?php echo htmlspecialchars($produtoBaseUrl); ?>" class="btn btn-outline-secondary btn-sm">
@@ -29,7 +29,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
     <?php endif; ?>
 
     <?php
-    // Garante que $produto seja um objeto Produto (novo ou reconstitu?do)
+    // Garante que $produto seja um objeto Produto (novo ou reconstituído)
     $p = ($produto instanceof Produto) ? $produto : new Produto();
 
     // $fiscal pode ser ProdutoFiscal ou null (produto sem dados fiscais)
@@ -45,7 +45,120 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
         <?php endif; ?>
 
         <!-- ================================================
-             SE??O 1 ? Dados Gerais
+             SEÇÃO — Classificação (Grupo / Subgrupo)
+        ================================================ -->
+        <div class="card shadow mb-3">
+            <div class="card-header py-2 fw-bold">
+                <i class="fas fa-folder-tree me-2 text-warning"></i>Classificação
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Grupo <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <select name="grupo_id" id="grupo_id" class="form-select" required>
+                                <option value="">— Selecione —</option>
+                                <?php foreach (($grupos ?? []) as $g): ?>
+                                    <option value="<?= (int)$g['id'] ?>"
+                                        <?= ((int)($p->grupo_id ?? 0) === (int)$g['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars((string)$g['nome']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-outline-primary" id="btnNovoGrupo"
+                                    title="Criar novo grupo">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <div class="invalid-feedback">Selecione um grupo.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Subgrupo <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <select name="subgrupo_id" id="subgrupo_id" class="form-select" required>
+                                <option value="">
+                                    <?= ((int)($p->grupo_id ?? 0) > 0) ? '— Selecione —' : 'Selecione um grupo primeiro' ?>
+                                </option>
+                                <?php foreach (($subgruposInit ?? []) as $sg): ?>
+                                    <option value="<?= (int)$sg['id'] ?>"
+                                        <?= ((int)($p->subgrupo_id ?? 0) === (int)$sg['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars((string)$sg['nome']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <button type="button" class="btn btn-outline-primary" id="btnNovoSubgrupo"
+                                    title="Criar novo subgrupo (exige grupo selecionado)">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                        </div>
+                        <div class="invalid-feedback">Selecione um subgrupo.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Novo Grupo -->
+        <div class="modal fade" id="modalNovoGrupo" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="fas fa-folder-plus me-2"></i>Novo Grupo</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nome <span class="text-danger">*</span></label>
+                            <input type="text" id="grupoNovoNome" class="form-control" maxlength="100" required>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Descrição</label>
+                            <textarea id="grupoNovoDesc" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-primary" id="btnSalvarGrupo">
+                            <i class="fas fa-save me-1"></i> Salvar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal: Novo Subgrupo -->
+        <div class="modal fade" id="modalNovoSubgrupo" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="fas fa-sitemap me-2"></i>Novo Subgrupo</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Grupo pai</label>
+                            <input type="text" id="subgrupoNovoGrupoNome" class="form-control" disabled>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nome <span class="text-danger">*</span></label>
+                            <input type="text" id="subgrupoNovoNome" class="form-control" maxlength="100" required>
+                        </div>
+                        <div class="mb-0">
+                            <label class="form-label">Descrição</label>
+                            <textarea id="subgrupoNovoDesc" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-primary" id="btnSalvarSubgrupo">
+                            <i class="fas fa-save me-1"></i> Salvar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================================================
+             SEÇÃO 1 — Dados Gerais
         ================================================ -->
         <div class="card shadow mb-3">
             <div class="card-header py-2 fw-bold">
@@ -59,7 +172,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                         <input type="text" name="codigo" class="form-control"
                                value="<?php echo htmlspecialchars($p->codigo ?? ''); ?>"
                                placeholder="Ex: PROD-001" maxlength="50">
-                        <div class="form-text">Opcional. Deve ser ?nico.</div>
+                        <div class="form-text">Opcional. Deve ser único.</div>
                     </div>
 
                     <div class="col-md-6">
@@ -115,7 +228,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                     </div>
 
                     <div class="col-md-3">
-                        <label class="form-label">Estoque M?nimo</label>
+                        <label class="form-label">Estoque Mínimo</label>
                         <input type="number" name="estoque_minimo" class="form-control"
                                min="0" step="0.0001"
                                value="<?php echo number_format($p->estoque_minimo, 4, '.', ''); ?>">
@@ -134,13 +247,13 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
         </div>
 
         <!-- ================================================
-             SE??O 2 ? Dados Fiscais (collapsible, opcional)
+             SEÇÃO 2 — Dados Fiscais (collapsible, opcional)
         ================================================ -->
         <div class="card shadow mb-4">
             <div class="card-header py-2 d-flex justify-content-between align-items-center">
                 <span class="fw-bold">
                     <i class="fas fa-file-invoice me-2 text-info"></i>Dados Fiscais
-                    <small class="text-muted fw-normal ms-2">? Opcional (NF-e ready)</small>
+                    <small class="text-muted fw-normal ms-2">· Opcional (NF-e ready)</small>
                 </span>
                 <button type="button" class="btn btn-sm btn-outline-secondary"
                         id="btnToggleFiscal"
@@ -154,7 +267,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
             <div class="collapse <?php echo $temFiscal ? 'show' : ''; ?>" id="secaoFiscal">
                 <div class="card-body">
 
-                    <p class="text-muted small fw-bold mb-2">CLASSIFICA??O FISCAL</p>
+                    <p class="text-muted small fw-bold mb-2">CLASSIFICAÇÃO FISCAL</p>
                     <div class="row g-3 mb-4">
 
                         <div class="col-md-2">
@@ -163,7 +276,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                                    value="<?php echo htmlspecialchars($f?->ncm ?? ''); ?>"
                                    placeholder="00000000"
                                    oninput="this.value=this.value.replace(/\D/g,'').slice(0,8)">
-                            <div class="form-text">8 d?gitos</div>
+                            <div class="form-text">8 dígitos</div>
                         </div>
 
                         <div class="col-md-2">
@@ -172,7 +285,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                                    value="<?php echo htmlspecialchars($f?->cfop ?? ''); ?>"
                                    placeholder="5102"
                                    oninput="this.value=this.value.replace(/\D/g,'').slice(0,4)">
-                            <div class="form-text">4 d?gitos</div>
+                            <div class="form-text">4 dígitos</div>
                         </div>
 
                         <div class="col-md-2">
@@ -181,7 +294,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                                    value="<?php echo htmlspecialchars($f?->cest ?? ''); ?>"
                                    placeholder="0000000"
                                    oninput="this.value=this.value.replace(/\D/g,'').slice(0,7)">
-                            <div class="form-text">7 d?gitos</div>
+                            <div class="form-text">7 dígitos</div>
                         </div>
 
                         <div class="col-md-6">
@@ -206,7 +319,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                                 / CST <small class="text-muted">(Lucro Real/Presumido)</small>
                             </label>
                             <select name="csosn_cst" class="form-select">
-                                <option value="">? Não aplic?vel ?</option>
+                                <option value="">— Não aplicável —</option>
                                 <?php foreach (ProdutoFiscal::CSOSN_CST as $grupo => $opcoes): ?>
                                 <optgroup label="<?php echo $grupo; ?>">
                                     <?php foreach ($opcoes as $val => $lbl): ?>
@@ -223,7 +336,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                         <div class="col-md-3">
                             <label class="form-label">Modalidade BC ICMS <span class="text-danger">*</span></label>
                             <select name="modalidade_bc_icms" class="form-select">
-                                <option value="">? Selecione ?</option>
+                                <option value="">— Selecione —</option>
                                 <?php foreach (ProdutoFiscal::MODALIDADES_BC_ICMS as $val => $lbl): ?>
                                 <option value="<?php echo $val; ?>"
                                     <?php echo ($f?->modalidade_bc_icms ?? '') === (string)$val ? 'selected' : ''; ?>>
@@ -251,7 +364,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                         <div class="col-md-6">
                             <label class="form-label">CST PIS <span class="text-danger">*</span></label>
                             <select name="cst_pis" class="form-select">
-                                <option value="">? Selecione ?</option>
+                                <option value="">— Selecione —</option>
                                 <?php foreach (ProdutoFiscal::CST_PIS_COFINS as $val => $lbl): ?>
                                 <option value="<?php echo $val; ?>"
                                     <?php echo ($f?->cst_pis ?? '') === (string)$val ? 'selected' : ''; ?>>
@@ -264,7 +377,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                         <div class="col-md-6">
                             <label class="form-label">CST COFINS <span class="text-danger">*</span></label>
                             <select name="cst_cofins" class="form-select">
-                                <option value="">? Selecione ?</option>
+                                <option value="">— Selecione —</option>
                                 <?php foreach (ProdutoFiscal::CST_PIS_COFINS as $val => $lbl): ?>
                                 <option value="<?php echo $val; ?>"
                                     <?php echo ($f?->cst_cofins ?? '') === (string)$val ? 'selected' : ''; ?>>
@@ -275,8 +388,8 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                         </div>
                     </div>
 
-                    <!-- Al?quotas -->
-                    <p class="text-muted small fw-bold mb-2">AL?QUOTAS (%)</p>
+                    <!-- Alíquotas -->
+                    <p class="text-muted small fw-bold mb-2">ALÍQUOTAS (%)</p>
                     <div class="row g-3">
                         <?php
                         $camposAliq = [
@@ -285,7 +398,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                             'aliquota_ipi'     => ['IPI',         $f?->aliquota_ipi     ?? 0],
                             'aliquota_pis'     => ['PIS',         $f?->aliquota_pis     ?? 0],
                             'aliquota_cofins'  => ['COFINS',      $f?->aliquota_cofins  ?? 0],
-                            'reducao_bc_icms'  => ['Redu??o BC',  $f?->reducao_bc_icms  ?? 0],
+                            'reducao_bc_icms'  => ['Redução BC',  $f?->reducao_bc_icms  ?? 0],
                         ];
                         foreach ($camposAliq as $campo => [$rotulo, $valor]):
                         ?>
@@ -301,7 +414,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
                     <p class="text-muted small fw-bold mt-4 mb-2">COMPLEMENTOS FISCAIS</p>
                     <div class="row g-3">
                         <div class="col-md-4">
-                            <label class="form-label">C?digo Benef?cio Fiscal</label>
+                            <label class="form-label">Código Benefício Fiscal</label>
                             <input type="text" name="codigo_beneficio_fiscal" class="form-control" maxlength="10"
                                    value="<?php echo htmlspecialchars($f?->codigo_beneficio_fiscal ?? ''); ?>"
                                    placeholder="Ex: SP123456">
@@ -326,7 +439,7 @@ $salvarProdutoUrl = function_exists('dmBuildUrl')
             </div>
         </div>
 
-        <!-- Bot?es -->
+        <!-- Botões -->
         <div class="d-flex gap-2 mb-4">
             <button type="submit" class="btn btn-primary" id="btnSalvar">
                 <i class="fas fa-save me-1"></i>
@@ -345,7 +458,7 @@ document.getElementById('formProduto').addEventListener('submit', function () {
     document.getElementById('btnSalvar').disabled = true;
 });
 
-// -- Toggle manual da se??o fiscal --------------------------------------
+// -- Toggle manual da seção fiscal --------------------------------------
 // Não usa data-bs-toggle para evitar que handlers globais (menu.js,
 // Bootstrap data-api) fechem o painel ao clicar em qualquer input.
 (function () {
@@ -354,7 +467,7 @@ document.getElementById('formProduto').addEventListener('submit', function () {
     var icon   = document.getElementById('iconToggleFiscal');
     if (!btn || !target) return;
 
-    // Cria inst?ncia do Collapse sem auto-toggle (respeita classe `show` j? presente)
+    // Cria instância do Collapse sem auto-toggle (respeita classe `show` já presente)
     var bsCollapse = new bootstrap.Collapse(target, { toggle: false });
 
     btn.addEventListener('click', function (e) {
@@ -371,6 +484,180 @@ document.getElementById('formProduto').addEventListener('submit', function () {
     target.addEventListener('hide.bs.collapse', function () {
         btn.setAttribute('aria-expanded', 'false');
         icon.style.transform = 'rotate(-90deg)';
+    });
+}());
+
+// -- Classificação: AJAX subgrupos + criação inline de grupo/subgrupo ----
+(function () {
+    var grupoSel = document.getElementById('grupo_id');
+    var sgSel    = document.getElementById('subgrupo_id');
+    if (!grupoSel || !sgSel) return;
+
+    var CSRF         = <?= json_encode($csrfToken ?? '', JSON_UNESCAPED_SLASHES) ?>;
+    var URL_LIST_SG  = <?= json_encode(tenantUrl('admin/ajax/produto-subgrupos.php'), JSON_UNESCAPED_SLASHES) ?>;
+    var URL_NEW_GRP  = <?= json_encode(tenantUrl('admin/ajax/criar-produto-grupo.php'), JSON_UNESCAPED_SLASHES) ?>;
+    var URL_NEW_SG   = <?= json_encode(tenantUrl('admin/ajax/criar-produto-subgrupo.php'), JSON_UNESCAPED_SLASHES) ?>;
+
+    var selectedSg = sgSel.value;
+
+    function alerta(texto, icon) {
+        // Mesmo estilo usado pelo footer.php/flashMessage
+        var titulo = icon === 'success' ? 'Sucesso' : (icon === 'error' ? 'Atenção' : 'Aviso');
+        var confirmClass = icon === 'error' ? 'btn btn-danger mx-1'
+                         : (icon === 'success' ? 'btn btn-success mx-1' : 'btn btn-warning mx-1');
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                title: titulo,
+                html: texto,
+                icon: icon,
+                confirmButtonText: 'OK',
+                buttonsStyling: false,
+                customClass: { confirmButton: confirmClass },
+                timer: icon === 'success' ? 1800 : undefined,
+                showConfirmButton: icon !== 'success'
+            });
+        } else {
+            alert(titulo + ': ' + texto);
+        }
+    }
+
+    // Carrega subgrupos ao trocar grupo
+    grupoSel.addEventListener('change', function () { carregarSubgrupos(this.value); });
+
+    function carregarSubgrupos(gid, selecionarId) {
+        sgSel.innerHTML = '<option value="">Carregando...</option>';
+        if (!gid) {
+            sgSel.innerHTML = '<option value="">Selecione um grupo primeiro</option>';
+            return;
+        }
+        fetch(URL_LIST_SG + '?grupo_id=' + encodeURIComponent(gid), {
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            if (!data.ok) {
+                sgSel.innerHTML = '<option value="">Falha ao carregar</option>';
+                return;
+            }
+            var alvo = selecionarId || selectedSg;
+            var html = '<option value="">— Selecione —</option>';
+            (data.itens || []).forEach(function (sg) {
+                var sel = (String(sg.id) === String(alvo)) ? ' selected' : '';
+                html += '<option value="' + sg.id + '"' + sel + '>' +
+                        sg.nome.replace(/</g, '&lt;') + '</option>';
+            });
+            sgSel.innerHTML = html;
+            selectedSg = '';
+        })
+        .catch(function () {
+            sgSel.innerHTML = '<option value="">Erro de rede</option>';
+        });
+    }
+
+    // Botão "+" Novo Grupo
+    var modalGrupoEl = document.getElementById('modalNovoGrupo');
+    var modalGrupo = modalGrupoEl ? new bootstrap.Modal(modalGrupoEl) : null;
+    document.getElementById('btnNovoGrupo').addEventListener('click', function () {
+        document.getElementById('grupoNovoNome').value = '';
+        document.getElementById('grupoNovoDesc').value = '';
+        modalGrupo.show();
+        setTimeout(function () { document.getElementById('grupoNovoNome').focus(); }, 200);
+    });
+
+    document.getElementById('btnSalvarGrupo').addEventListener('click', function () {
+        var btn = this;
+        var nome = document.getElementById('grupoNovoNome').value.trim();
+        var desc = document.getElementById('grupoNovoDesc').value.trim();
+        if (!nome) { alerta('Informe o nome do grupo.', 'warning'); return; }
+
+        btn.disabled = true;
+        var fd = new FormData();
+        fd.append('nome', nome);
+        fd.append('descricao', desc);
+        fd.append('csrf_token', CSRF);
+
+        fetch(URL_NEW_GRP, {
+            method: 'POST', body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'X-CSRF-Token': CSRF },
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+        .then(function (res) {
+            btn.disabled = false;
+            if (!res.data.ok) {
+                alerta(res.data.erro || 'Não foi possível criar o grupo.', 'error');
+                return;
+            }
+            // Inserir novo grupo no select e selecionar
+            var opt = document.createElement('option');
+            opt.value = res.data.id;
+            opt.textContent = res.data.nome;
+            opt.selected = true;
+            grupoSel.appendChild(opt);
+            grupoSel.value = String(res.data.id);
+            // Dispara change para carregar subgrupos (vazio)
+            sgSel.innerHTML = '<option value="">— Selecione —</option>';
+            modalGrupo.hide();
+            alerta('Grupo "' + res.data.nome + '" criado.', 'success');
+        })
+        .catch(function () {
+            btn.disabled = false;
+            alerta('Erro de rede ao salvar o grupo.', 'error');
+        });
+    });
+
+    // Botão "+" Novo Subgrupo
+    var modalSgEl = document.getElementById('modalNovoSubgrupo');
+    var modalSg = modalSgEl ? new bootstrap.Modal(modalSgEl) : null;
+    document.getElementById('btnNovoSubgrupo').addEventListener('click', function () {
+        if (!grupoSel.value) {
+            alerta('Selecione o grupo pai antes de criar um subgrupo.', 'warning');
+            return;
+        }
+        document.getElementById('subgrupoNovoGrupoNome').value = grupoSel.options[grupoSel.selectedIndex].text;
+        document.getElementById('subgrupoNovoNome').value = '';
+        document.getElementById('subgrupoNovoDesc').value = '';
+        modalSg.show();
+        setTimeout(function () { document.getElementById('subgrupoNovoNome').focus(); }, 200);
+    });
+
+    document.getElementById('btnSalvarSubgrupo').addEventListener('click', function () {
+        var btn = this;
+        var nome = document.getElementById('subgrupoNovoNome').value.trim();
+        var desc = document.getElementById('subgrupoNovoDesc').value.trim();
+        var gid  = grupoSel.value;
+        if (!gid)  { alerta('Grupo pai não definido. Feche e tente novamente.', 'warning'); return; }
+        if (!nome) { alerta('Informe o nome do subgrupo.', 'warning'); return; }
+
+        btn.disabled = true;
+        var fd = new FormData();
+        fd.append('grupo_id', gid);
+        fd.append('nome', nome);
+        fd.append('descricao', desc);
+        fd.append('csrf_token', CSRF);
+
+        fetch(URL_NEW_SG, {
+            method: 'POST', body: fd,
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json', 'X-CSRF-Token': CSRF },
+            credentials: 'same-origin'
+        })
+        .then(function (r) { return r.json().then(function (d) { return { status: r.status, data: d }; }); })
+        .then(function (res) {
+            btn.disabled = false;
+            if (!res.data.ok) {
+                alerta(res.data.erro || 'Não foi possível criar o subgrupo.', 'error');
+                return;
+            }
+            // Recarrega subgrupos e seleciona o novo
+            carregarSubgrupos(gid, res.data.id);
+            modalSg.hide();
+            alerta('Subgrupo "' + res.data.nome + '" criado.', 'success');
+        })
+        .catch(function () {
+            btn.disabled = false;
+            alerta('Erro de rede ao salvar o subgrupo.', 'error');
+        });
     });
 }());
 </script>

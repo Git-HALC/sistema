@@ -52,41 +52,35 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
             </li>
             <?php endif; ?>
 
-            <?php if ($can('clientes')): ?>
+            <?php if ($can('clientes') || $can('produtos') || $can('servicos')): ?>
             <li class="menu-item has-submenu">
-                <a href="#clientesSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="menu-link submenu-toggle" title="Clientes">
-                    <i class="fas fa-address-book menu-icon"></i>
-                    <span class="menu-text">Clientes</span>
+                <a href="#cadastroSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="menu-link submenu-toggle" title="Cadastro">
+                    <i class="fas fa-folder-open menu-icon"></i>
+                    <span class="menu-text">Cadastro</span>
                     <i class="fas fa-chevron-down submenu-arrow"></i>
                 </a>
-                <ul class="submenu collapse" id="clientesSubmenu">
+                <ul class="submenu collapse" id="cadastroSubmenu">
+                    <?php if ($can('clientes')): ?>
+                    <li class="submenu-group-label"><i class="fas fa-address-book me-1"></i> Clientes</li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/clientes.php?action=novo')); ?>" class="submenu-link"><i class="fas fa-plus"></i> Novo Cliente</a></li>
-                    <li><a href="<?php echo htmlspecialchars($url('admin/clientes.php')); ?>" class="submenu-link"><i class="fas fa-list"></i> Lista de Clientes</a></li>
-                </ul>
-            </li>
-            <?php endif; ?>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/clientes.php')); ?>" class="submenu-link"><i class="fas fa-list"></i> Listar Clientes</a></li>
+                    <?php endif; ?>
 
-            <?php if ($can('produtos')): ?>
-            <li class="menu-item has-submenu">
-                <a href="#produtosSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="menu-link submenu-toggle" title="Produtos">
-                    <i class="fas fa-box menu-icon"></i>
-                    <span class="menu-text">Produtos</span>
-                    <i class="fas fa-chevron-down submenu-arrow"></i>
-                </a>
-                <ul class="submenu collapse" id="produtosSubmenu">
+                    <?php if ($can('produtos')): ?>
+                    <li class="submenu-group-label"><i class="fas fa-box me-1"></i> Produtos</li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/produtos.php?action=novo')); ?>" class="submenu-link"><i class="fas fa-plus"></i> Novo Produto</a></li>
-                    <li><a href="<?php echo htmlspecialchars($url('admin/produtos.php')); ?>" class="submenu-link"><i class="fas fa-list"></i> Lista de Produtos</a></li>
-                    <li><a href="<?php echo htmlspecialchars($url('admin/produtos.php?action=inventario')); ?>" class="submenu-link"><i class="fas fa-boxes"></i> Inventario de Estoque</a></li>
-                </ul>
-            </li>
-            <?php endif; ?>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/produtos.php')); ?>" class="submenu-link"><i class="fas fa-list"></i> Listar Produtos</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/produto-grupos.php')); ?>" class="submenu-link"><i class="fas fa-folder"></i> Grupos de Produtos</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/produto-subgrupos.php')); ?>" class="submenu-link"><i class="fas fa-folder-tree"></i> Subgrupos de Produtos</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/produtos.php?action=inventario')); ?>" class="submenu-link"><i class="fas fa-boxes"></i> Inventário de Estoque</a></li>
+                    <?php endif; ?>
 
-            <?php if ($can('servicos')): ?>
-            <li class="menu-item">
-                <a href="<?php echo htmlspecialchars($url('admin/servicos.php')); ?>" class="menu-link" title="Serviços">
-                    <i class="fas fa-tools menu-icon"></i>
-                    <span class="menu-text">Serviços</span>
-                </a>
+                    <?php if ($can('servicos')): ?>
+                    <li class="submenu-group-label"><i class="fas fa-tools me-1"></i> Serviços</li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/servicos.php?action=novo')); ?>" class="submenu-link"><i class="fas fa-plus"></i> Novo Serviço</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/servicos.php')); ?>" class="submenu-link"><i class="fas fa-list"></i> Listar Serviços</a></li>
+                    <?php endif; ?>
+                </ul>
             </li>
             <?php endif; ?>
 
@@ -116,8 +110,8 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
                     <i class="fas fa-chevron-down submenu-arrow"></i>
                 </a>
                 <ul class="submenu collapse" id="fiscalSubmenu">
-                    <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=listar')); ?>" class="submenu-link"><i class="fas fa-list"></i> NF-e Emitidas</a></li>
-                    <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=faturaveis')); ?>" class="submenu-link"><i class="fas fa-plus"></i> Emitir NF-e</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/fiscal/emitir.php')); ?>" class="submenu-link"><i class="fas fa-file-invoice-dollar"></i> Vendas sem Fiscal</a></li>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=listar')); ?>" class="submenu-link"><i class="fas fa-list"></i> NF-e (pedidos legado)</a></li>
                     <li><a href="<?php echo htmlspecialchars($url('admin/fiscal.php?action=homologacao')); ?>" class="submenu-link"><i class="fas fa-vial"></i> Homologação</a></li>
                 </ul>
             </li>
@@ -184,20 +178,19 @@ $cleanUrl = static fn(string $path = ''): string => function_exists('tenantClean
             <?php endif; ?>
 
             <?php if ($isAdmin): ?>
-            <li class="menu-item">
-                <a href="<?php echo htmlspecialchars($url('admin/dados-empresa.php')); ?>" class="menu-link" title="Dados da Empresa">
-                    <i class="fas fa-building menu-icon"></i>
-                    <span class="menu-text">Dados da Empresa</span>
-                </a>
-            </li>
-            <?php endif; ?>
-
-            <?php if ($isAdmin): ?>
-            <li class="menu-item">
-                <a href="<?php echo htmlspecialchars($url('admin/settings.php')); ?>" class="menu-link" title="Configuracoes">
+            <li class="menu-item has-submenu">
+                <a href="#configuracoesSubmenu" data-bs-toggle="collapse" aria-expanded="false" class="menu-link submenu-toggle" title="Configuracoes">
                     <i class="fas fa-cog menu-icon"></i>
                     <span class="menu-text">Configuracoes</span>
+                    <i class="fas fa-chevron-down submenu-arrow"></i>
                 </a>
+                <ul class="submenu collapse" id="configuracoesSubmenu">
+                    <li><a href="<?php echo htmlspecialchars($url('admin/dados-empresa.php')); ?>" class="submenu-link"><i class="fas fa-building"></i> Dados da Empresa</a></li>
+                    <?php if ($can('fiscal')): ?>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/fiscal/perfil.php')); ?>" class="submenu-link"><i class="fas fa-sliders-h"></i> Perfil Tributário</a></li>
+                    <?php endif; ?>
+                    <li><a href="<?php echo htmlspecialchars($url('admin/settings.php')); ?>" class="submenu-link"><i class="fas fa-cogs"></i> Sistema</a></li>
+                </ul>
             </li>
             <?php endif; ?>
 

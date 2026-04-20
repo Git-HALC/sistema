@@ -48,7 +48,7 @@
                         <select class="form-control" id="tipo" name="tipo">
                             <option value="">Todos</option>
                             <option value="Entrada" <?php echo (isset($_GET['tipo']) && $_GET['tipo'] == 'Entrada') ? 'selected' : ''; ?>>Entrada</option>
-                            <option value="Saída" <?php echo (isset($_GET['tipo']) && $_GET['tipo'] == 'Saída') ? 'selected' : ''; ?>>Saída</option>
+                            <option value="Saida" <?php echo (isset($_GET['tipo']) && $_GET['tipo'] == 'Saida') ? 'selected' : ''; ?>>Saída</option>
                         </select>
                     </div>
                     
@@ -93,7 +93,7 @@
                         <select class="form-control" id="tipo_mobile" name="tipo">
                             <option value="">Todos</option>
                             <option value="Entrada" <?php echo (isset($_GET['tipo']) && $_GET['tipo'] == 'Entrada') ? 'selected' : ''; ?>>Entrada</option>
-                            <option value="Saída" <?php echo (isset($_GET['tipo']) && $_GET['tipo'] == 'Saída') ? 'selected' : ''; ?>>Saída</option>
+                            <option value="Saida" <?php echo (isset($_GET['tipo']) && $_GET['tipo'] == 'Saida') ? 'selected' : ''; ?>>Saída</option>
                         </select>
                     </div>
                     
@@ -187,7 +187,9 @@
                                                     </button>
                                                 </div>
                                             <?php else: ?>
-                                                <span class="badge bg-info" title="Esta movimentação foi gerada automaticamente de um título e não pode ser editada.">Vinculada</span>
+                                                <span class="btn btn-outline-secondary btn-sm disabled" title="Movimentação vinculada a um título (conta a receber/pagar). Não pode ser editada diretamente.">
+                                                    <i class="fas fa-lock"></i>
+                                                </span>
                                             <?php endif; ?>
                                         </td>
                                     </tr>
@@ -304,7 +306,7 @@
                             <label for="edit_tipo" class="form-label">Tipo *</label>
                             <select class="form-select" id="edit_tipo" name="tipo" required>
                                 <option value="Entrada">Entrada (Receita)</option>
-                                <option value="Saída">Saída (Despesa)</option>
+                                <option value="Saida">Saída (Despesa)</option>
                             </select>
                         </div>
                         
@@ -396,7 +398,7 @@ $(document).ready(function() {
                 const selected = cat.id == categoriaAtualId ? ' selected' : '';
                 categoriaSelect.append(`<option value="${cat.id}"${selected}>${cat.nome}</option>`);
             });
-        } else if (tipo === 'Saída') {
+        } else if (tipo === 'Saida') {
             categoriaSelect.append('<option value="">Selecione...</option>');
             categoriasDespesa.forEach(function(cat) {
                 const selected = cat.id == categoriaAtualId ? ' selected' : '';
@@ -420,7 +422,7 @@ $(document).ready(function() {
             categoriasReceita.forEach(function(cat) {
                 categoriaSelect.append(`<option value="${cat.id}">${cat.nome}</option>`);
             });
-        } else if (tipo === 'Saída') {
+        } else if (tipo === 'Saida') {
             categoriaSelect.append('<option value="">Selecione...</option>');
             categoriasDespesa.forEach(function(cat) {
                 categoriaSelect.append(`<option value="${cat.id}">${cat.nome}</option>`);

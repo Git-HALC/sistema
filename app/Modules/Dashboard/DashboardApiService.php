@@ -5,171 +5,84 @@ declare(strict_types=1);
 namespace App\Modules\Dashboard;
 
 use App\Support\DashboardApiException;
-use DateInterval;
-use DatePeriod;
 use DateTimeImmutable;
 use PDO;
 
+/**
+ * API do Dashboard Geral — centrado em pdv_vendas/pdv_venda_itens.
+ *
+ * Endpoints servidos:
+ *  - GET dashboard/kpis               → getKpis()
+ *  - GET dashboard/faturamento        → getFaturamento($period)
+ *  - GET dashboard/atividade-recente  → getAtividadeRecente($page)
+ *  - GET dashboard/top-itens          → getTopItens($period)
+ *  - GET dashboard/formas-pagamento   → getFormasPagamento($period)
+ *  - GET dashboard/vendas-hora        → getVendasPorHora($period)
+ */
 class DashboardApiService
 {
-    /** @var array<string, bool> */
-    private array $columnCache = [];
+    private readonly DashboardGeralRepository $repo;
 
-    public function __construct(private readonly PDO $pdo) {}
+    public function __construct(private readonly PDO $pdo)
+    {
+        $this->repo = new DashboardGeralRepository($pdo);
+    }
 
     public function getKpis(): array
     {
-        $currentMonthStart = (new DateTimeImmutable('first day of this month'))->format('Y-m-d');
-        $currentMonthEnd = (new DateTimeImmutable('last day of this month'))->format('Y-m-d');
-        $previousMonthStart = (new DateTimeImmutable('first day of previous month'))->format('Y-m-d');
-        $previousMonthEnd = (new DateTimeImmutable('last day of previous month'))->format('Y-m-d');
+        [$ini, $fim] = $this->periodoMesAtual();
+        [$iniAnterior, $fimAnterior] = $this->periodoMesAnterior();
 
-        $clientesAtivos = (int)$this->scalar("
-            SELECT COUNT(*)
-            FROM clientes
-            WHERE ativo = TRUE
-        ");
+        $atual = $this->repo->kpiVendas($ini, $fim);
+        $anterior = $this->repo->kpiVendas($iniAnterior, $fimAnterior);
 
-        $clientesAtivosAnterior = $this->hasColumn('clientes', 'created_at')
-            ? (int)$this->scalar("
-                SELECT COUNT(*)
-                FROM clientes
-                WHERE ativo = TRUE
-                  AND created_at < CAST(:inicio_atual AS date)
-            ", [':inicio_atual' => $currentMonthStart])
-            : $clientesAtivos;
+        $clientesNovosAtual = $this->repo->kpiClientesNovos($ini, $fim);
+        $clientesNovosAnterior = $this->repo->kpiClientesNovos($iniAnterior, $fimAnterior);
 
-        $pedidosAtual = $this->fetchAssoc("
-            SELECT COUNT(*) AS total,
-                   COALESCE(SUM(valor_total), 0) AS valor_total
-            FROM pedidos
-            WHERE ativo = TRUE
-              AND status <> 'CANCELADO'
-              AND (data_pedido AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-        ", [':inicio' => $currentMonthStart, ':fim' => $currentMonthEnd]);
-
-        $pedidosAnterior = $this->fetchAssoc("
-            SELECT COUNT(*) AS total,
-                   COALESCE(SUM(valor_total), 0) AS valor_total
-            FROM pedidos
-            WHERE ativo = TRUE
-              AND status <> 'CANCELADO'
-              AND (data_pedido AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-        ", [':inicio' => $previousMonthStart, ':fim' => $previousMonthEnd]);
-
-        $servicosAndamentoAtual = (int)$this->scalar("
-            SELECT COUNT(*)
-            FROM servicos
-            WHERE ativo = TRUE
-              AND status IN ('PENDENTE', 'EM_PROCESSO')
-        ");
-
-        $servicosAndamentoAnterior = (int)$this->scalar("
-            SELECT COUNT(*)
-            FROM servicos
-            WHERE ativo = TRUE
-              AND status IN ('PENDENTE', 'EM_PROCESSO')
-              AND (data_servico AT TIME ZONE 'America/Sao_Paulo')::date < :inicio_atual
-        ", [':inicio_atual' => $currentMonthStart]);
-
-        $faturamentoAtual = $this->fetchAssoc("
-            SELECT
-                COALESCE(SUM(pedidos_valor), 0) AS pedidos,
-                COALESCE(SUM(servicos_valor), 0) AS servicos
-            FROM (
-                SELECT COALESCE(SUM(valor_total), 0) AS pedidos_valor, 0::numeric AS servicos_valor
-                FROM pedidos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-
-                UNION ALL
-
-                SELECT 0::numeric AS pedidos_valor, COALESCE(SUM(valor_total), 0) AS servicos_valor
-                FROM servicos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-            ) base
-        ", [':inicio' => $currentMonthStart, ':fim' => $currentMonthEnd]);
-
-        $faturamentoAnterior = $this->fetchAssoc("
-            SELECT
-                COALESCE(SUM(pedidos_valor), 0) AS pedidos,
-                COALESCE(SUM(servicos_valor), 0) AS servicos
-            FROM (
-                SELECT COALESCE(SUM(valor_total), 0) AS pedidos_valor, 0::numeric AS servicos_valor
-                FROM pedidos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-
-                UNION ALL
-
-                SELECT 0::numeric AS pedidos_valor, COALESCE(SUM(valor_total), 0) AS servicos_valor
-                FROM servicos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-            ) base
-        ", [':inicio' => $previousMonthStart, ':fim' => $previousMonthEnd]);
+        $estoqueCriticoCount = $this->repo->kpiEstoqueCriticoCount();
 
         return [
             'periodo' => [
-                'inicio' => $currentMonthStart,
-                'fim' => $currentMonthEnd,
-                'comparacao_inicio' => $previousMonthStart,
-                'comparacao_fim' => $previousMonthEnd,
+                'inicio' => $ini,
+                'fim' => $fim,
+                'comparacao_inicio' => $iniAnterior,
+                'comparacao_fim' => $fimAnterior,
             ],
             'kpis' => [
-                'clientes_ativos' => [
-                    'valor' => $clientesAtivos,
-                    'variacao_percentual' => $this->percentChange($clientesAtivos, $clientesAtivosAnterior),
-                    'variacao_absoluta' => $clientesAtivos - $clientesAtivosAnterior,
-                    'referencia' => 'vs inicio do mes',
-                    'sparkline' => $this->clientesAtivosSparkline(),
+                'faturamento_mes' => [
+                    'valor' => $atual['total'],
+                    'variacao_percentual' => $this->percentChange($atual['total'], $anterior['total']),
+                    'variacao_absoluta' => round($atual['total'] - $anterior['total'], 2),
+                    'referencia' => 'vs mes anterior',
+                    'href' => $this->adminUrl('admin/financeiro/dashboard.php'),
+                ],
+                'vendas_mes' => [
+                    'valor' => $atual['quantidade'],
+                    'variacao_percentual' => $this->percentChange($atual['quantidade'], $anterior['quantidade']),
+                    'variacao_absoluta' => $atual['quantidade'] - $anterior['quantidade'],
+                    'referencia' => 'vs mes anterior',
+                    'href' => $this->adminUrl('admin/relatorios/financeiros/relatorio_vendas_pdv.php'),
+                ],
+                'ticket_medio' => [
+                    'valor' => $atual['ticket_medio'],
+                    'variacao_percentual' => $this->percentChange($atual['ticket_medio'], $anterior['ticket_medio']),
+                    'variacao_absoluta' => round($atual['ticket_medio'] - $anterior['ticket_medio'], 2),
+                    'referencia' => 'vs mes anterior',
+                    'href' => $this->adminUrl('admin/relatorios/financeiros/relatorio_vendas_pdv.php'),
+                ],
+                'clientes_novos' => [
+                    'valor' => $clientesNovosAtual,
+                    'variacao_percentual' => $this->percentChange($clientesNovosAtual, $clientesNovosAnterior),
+                    'variacao_absoluta' => $clientesNovosAtual - $clientesNovosAnterior,
+                    'referencia' => 'vs mes anterior',
                     'href' => $this->adminUrl('admin/clientes.php'),
                 ],
-                'pedidos_mes' => [
-                    'valor' => (int)($pedidosAtual['total'] ?? 0),
-                    'valor_financeiro' => (float)($pedidosAtual['valor_total'] ?? 0),
-                    'variacao_percentual' => $this->percentChange(
-                        (float)($pedidosAtual['total'] ?? 0),
-                        (float)($pedidosAnterior['total'] ?? 0)
-                    ),
-                    'variacao_absoluta' => (int)($pedidosAtual['total'] ?? 0) - (int)($pedidosAnterior['total'] ?? 0),
-                    'referencia' => 'vs mes anterior',
-                    'sparkline' => $this->pedidosSparkline(),
-                    'href' => $this->adminUrl('admin/pedidos.php?action=listar'),
-                ],
-                'servicos_em_andamento' => [
-                    'valor' => $servicosAndamentoAtual,
-                    'variacao_percentual' => $this->percentChange($servicosAndamentoAtual, $servicosAndamentoAnterior),
-                    'variacao_absoluta' => $servicosAndamentoAtual - $servicosAndamentoAnterior,
-                    'referencia' => 'baseado no estoque atual de servicos abertos',
-                    'sparkline' => $this->servicosEmAndamentoSparkline(),
-                    'href' => $this->adminUrl('admin/servicos.php?action=kanban'),
-                ],
-                'faturamento_mes' => [
-                    'valor' => (float)($faturamentoAtual['pedidos'] ?? 0) + (float)($faturamentoAtual['servicos'] ?? 0),
-                    'pedidos' => (float)($faturamentoAtual['pedidos'] ?? 0),
-                    'servicos' => (float)($faturamentoAtual['servicos'] ?? 0),
-                    'variacao_percentual' => $this->percentChange(
-                        (float)($faturamentoAtual['pedidos'] ?? 0) + (float)($faturamentoAtual['servicos'] ?? 0),
-                        (float)($faturamentoAnterior['pedidos'] ?? 0) + (float)($faturamentoAnterior['servicos'] ?? 0)
-                    ),
-                    'variacao_absoluta' => (
-                        (float)($faturamentoAtual['pedidos'] ?? 0) + (float)($faturamentoAtual['servicos'] ?? 0)
-                    ) - (
-                        (float)($faturamentoAnterior['pedidos'] ?? 0) + (float)($faturamentoAnterior['servicos'] ?? 0)
-                    ),
-                    'referencia' => 'vs mes anterior',
-                    'sparkline' => $this->faturamentoSparkline(),
-                    'href' => $this->adminUrl('admin/financeiro/dashboard.php'),
+                'estoque_critico' => [
+                    'valor' => $estoqueCriticoCount,
+                    'variacao_percentual' => 0.0,
+                    'variacao_absoluta' => 0,
+                    'referencia' => 'produtos abaixo do minimo',
+                    'href' => $this->adminUrl('admin/produtos.php'),
                 ],
             ],
         ];
@@ -178,90 +91,72 @@ class DashboardApiService
     public function getFaturamento(string $period): array
     {
         $period = strtoupper(trim($period));
-        $config = match ($period) {
-            '7D' => ['days' => 7, 'step' => '1 day', 'bucket' => 'day', 'format' => 'DD/MM'],
-            '30D' => ['days' => 30, 'step' => '1 day', 'bucket' => 'day', 'format' => 'DD/MM'],
-            '90D' => ['days' => 90, 'step' => '1 day', 'bucket' => 'day', 'format' => 'DD/MM'],
-            '12M' => ['days' => 365, 'step' => '1 month', 'bucket' => 'month', 'format' => 'MM/YYYY'],
+        $days = match ($period) {
+            '7D' => 7,
+            '30D' => 30,
+            '90D' => 90,
             default => throw new DashboardApiException('Periodo invalido.', 400),
         };
 
-        $start = $period === '12M'
-            ? (new DateTimeImmutable('first day of -11 months'))->format('Y-m-01')
-            : (new DateTimeImmutable('-' . ($config['days'] - 1) . ' days'))->format('Y-m-d');
-        $end = (new DateTimeImmutable('today'))->format('Y-m-d');
-
-        $labelSql = $config['bucket'] === 'month'
-            ? "TO_CHAR(serie.data_ref, 'MM/YYYY')"
-            : "TO_CHAR(serie.data_ref, 'DD/MM')";
-        $pedidoDataRef = $config['bucket'] === 'month'
-            ? "DATE_TRUNC('month', data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date"
-            : "(data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date";
-        $servicoDataRef = $pedidoDataRef;
-
-        $sql = "
-            WITH serie AS (
-                SELECT generate_series(CAST(:inicio AS date), CAST(:fim AS date), INTERVAL '{$config['step']}')::date AS data_ref
-            ),
-            pedidos AS (
-                SELECT {$pedidoDataRef} AS data_ref,
-                       COALESCE(SUM(valor_total), 0) AS total
-                FROM pedidos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN CAST(:inicio AS date) AND CAST(:fim AS date)
-                GROUP BY 1
-            ),
-            servicos AS (
-                SELECT {$servicoDataRef} AS data_ref,
-                       COALESCE(SUM(valor_total), 0) AS total
-                FROM servicos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN CAST(:inicio AS date) AND CAST(:fim AS date)
-                GROUP BY 1
-            )
-            SELECT serie.data_ref,
-                   {$labelSql} AS label,
-                   COALESCE(pedidos.total, 0) AS pedidos,
-                   COALESCE(servicos.total, 0) AS servicos
-            FROM serie
-            LEFT JOIN pedidos ON pedidos.data_ref = serie.data_ref
-            LEFT JOIN servicos ON servicos.data_ref = serie.data_ref
-            ORDER BY serie.data_ref ASC
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([':inicio' => $start, ':fim' => $end]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-
+        $rows = $this->repo->vendasPorDia($days);
         $labels = [];
-        $pedidos = [];
-        $servicos = [];
-        $total = [];
-
-        foreach ($rows as $row) {
-            $labels[] = (string)($row['label'] ?? '');
-            $pedidoValor = (float)($row['pedidos'] ?? 0);
-            $servicoValor = (float)($row['servicos'] ?? 0);
-            $pedidos[] = round($pedidoValor, 2);
-            $servicos[] = round($servicoValor, 2);
-            $total[] = round($pedidoValor + $servicoValor, 2);
+        $totais = [];
+        foreach ($rows as $r) {
+            $labels[] = (string)$r['dia'];
+            $totais[] = round((float)$r['total'], 2);
         }
 
         return [
             'periodo' => $period,
-            'inicio' => $start,
-            'fim' => $end,
-            'agrupamento' => $config['bucket'],
             'labels' => $labels,
             'series' => [
-                'pedidos' => $pedidos,
-                'servicos' => $servicos,
-                'total' => $total,
+                'vendas' => $totais,
             ],
+        ];
+    }
+
+    public function getTopItens(string $period): array
+    {
+        [$ini, $fim] = $this->periodoPorTexto($period);
+        $rows = $this->repo->topItensVendidos($ini, $fim, 5);
+
+        return [
+            'labels' => array_map(static fn ($r) => (string)$r['nome'], $rows),
+            'quantidades' => array_map(static fn ($r) => (float)$r['qtd_vendida'], $rows),
+            'totais' => array_map(static fn ($r) => round((float)$r['total_vendido'], 2), $rows),
+        ];
+    }
+
+    public function getFormasPagamento(string $period): array
+    {
+        [$ini, $fim] = $this->periodoPorTexto($period);
+        $rows = $this->repo->vendasPorForma($ini, $fim);
+
+        return [
+            'labels' => array_map(static fn ($r) => (string)$r['forma'], $rows),
+            'totais' => array_map(static fn ($r) => round((float)$r['total'], 2), $rows),
+            'tipos' => array_map(static fn ($r) => (string)$r['tipo'], $rows),
+        ];
+    }
+
+    public function getVendasPorHora(string $period): array
+    {
+        [$ini, $fim] = $this->periodoPorTexto($period);
+        $rows = $this->repo->vendasPorHora($ini, $fim);
+
+        $labels = [];
+        $quantidades = [];
+        $totais = [];
+        foreach ($rows as $r) {
+            $labels[] = sprintf('%02dh', (int)$r['hora']);
+            $quantidades[] = (int)$r['quantidade'];
+            $totais[] = round((float)$r['total'], 2);
+        }
+
+        return [
+            'labels' => $labels,
+            'quantidades' => $quantidades,
+            'totais' => $totais,
         ];
     }
 
@@ -271,69 +166,33 @@ class DashboardApiService
         $perPage = max(1, min(50, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $sql = "
-            SELECT *
-            FROM (
-                SELECT
-                    'pedido' AS tipo,
-                    p.id::text AS id,
-                    p.numero,
-                    COALESCE(c.nome, 'Sem cliente') AS cliente_nome,
-                    p.status,
-                    p.valor_total,
-                    COALESCE(p.updated_at, p.data_pedido) AS data_evento
-                FROM pedidos p
-                LEFT JOIN clientes c ON c.id::text = p.cliente_id::text
-                WHERE p.ativo = TRUE
-
-                UNION ALL
-
-                SELECT
-                    'servico' AS tipo,
-                    s.id::text AS id,
-                    s.numero,
-                    COALESCE(NULLIF(s.nome_cliente, ''), c.nome, 'Sem cliente') AS cliente_nome,
-                    s.status,
-                    s.valor_total,
-                    COALESCE(s.updated_at, s.data_servico) AS data_evento
-                FROM servicos s
-                LEFT JOIN clientes c ON c.id = s.cliente_id
-                WHERE s.ativo = TRUE
-            ) atividade
-            ORDER BY data_evento DESC
-            LIMIT :limit OFFSET :offset
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt = $this->pdo->prepare(
+            "SELECT v.id, v.numero, v.valor_total, v.created_at, v.status, v.origem,
+                    COALESCE(fp.nome, 'A definir') AS forma,
+                    COALESCE(cli.nome, 'Consumidor') AS cliente_nome
+               FROM pdv_vendas v
+               LEFT JOIN formas_pagamento fp ON fp.id = v.forma_pagamento_id
+               LEFT JOIN clientes cli ON cli.id = v.cliente_id
+              ORDER BY v.created_at DESC
+              LIMIT :lim OFFSET :off"
+        );
+        $stmt->bindValue(':lim', $perPage, PDO::PARAM_INT);
+        $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
         $stmt->execute();
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-        $total = (int)$this->scalar("
-            SELECT COUNT(*)
-            FROM (
-                SELECT id FROM pedidos WHERE ativo = TRUE
-                UNION ALL
-                SELECT id FROM servicos WHERE ativo = TRUE
-            ) atividade
-        ");
+        $total = (int)$this->pdo->query("SELECT COUNT(*) FROM pdv_vendas")->fetchColumn();
 
-        $items = array_map(function (array $row): array {
-            $tipo = (string)($row['tipo'] ?? '');
-            $id = (string)($row['id'] ?? '');
-
+        $items = array_map(function (array $r): array {
             return [
-                'tipo' => $tipo,
-                'id' => $id,
-                'numero' => isset($row['numero']) ? (int)$row['numero'] : null,
-                'cliente_nome' => (string)($row['cliente_nome'] ?? 'Sem cliente'),
-                'status' => (string)($row['status'] ?? ''),
-                'valor_total' => (float)($row['valor_total'] ?? 0),
-                'data_evento' => (string)($row['data_evento'] ?? ''),
-                'href' => $tipo === 'pedido'
-                    ? $this->adminUrl('admin/pedidos.php?action=show&id=' . urlencode($id))
-                    : $this->adminUrl('admin/servicos.php?action=visualizar&id=' . urlencode($id)),
+                'id' => (string)$r['id'],
+                'numero' => (int)$r['numero'],
+                'cliente_nome' => (string)$r['cliente_nome'],
+                'forma' => (string)$r['forma'],
+                'status' => (string)$r['status'],
+                'origem' => (string)$r['origem'],
+                'valor_total' => (float)$r['valor_total'],
+                'data_evento' => (string)$r['created_at'],
             ];
         }, $rows);
 
@@ -348,159 +207,36 @@ class DashboardApiService
         ];
     }
 
-    private function clientesAtivosSparkline(): array
+    private function periodoMesAtual(): array
     {
-        $current = (int)$this->scalar("
-            SELECT COUNT(*)
-            FROM clientes
-            WHERE ativo = TRUE
-        ");
-
-        if (!$this->hasColumn('clientes', 'created_at')) {
-            return array_fill(0, 7, $current);
-        }
-
-        $start = new DateTimeImmutable('-6 days');
-        $values = [];
-        foreach (new DatePeriod($start, new DateInterval('P1D'), 7) as $day) {
-            $values[] = (int)$this->scalar("
-                SELECT COUNT(*)
-                FROM clientes
-                WHERE ativo = TRUE
-                  AND created_at < (:limite::date + INTERVAL '1 day')
-            ", [':limite' => $day->format('Y-m-d')]);
-        }
-
-        return $values;
+        $hoje = new DateTimeImmutable('today');
+        return [
+            $hoje->modify('first day of this month')->format('Y-m-d'),
+            $hoje->modify('last day of this month')->format('Y-m-d'),
+        ];
     }
 
-    private function pedidosSparkline(): array
+    private function periodoMesAnterior(): array
     {
-        return $this->dailySeries("
-            SELECT (data_pedido AT TIME ZONE 'America/Sao_Paulo')::date AS data_ref,
-                   COUNT(*) AS total
-            FROM pedidos
-            WHERE ativo = TRUE
-              AND status <> 'CANCELADO'
-              AND (data_pedido AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-            GROUP BY 1
-        ");
+        $hoje = new DateTimeImmutable('today');
+        return [
+            $hoje->modify('first day of previous month')->format('Y-m-d'),
+            $hoje->modify('last day of previous month')->format('Y-m-d'),
+        ];
     }
 
-    private function servicosEmAndamentoSparkline(): array
+    private function periodoPorTexto(string $period): array
     {
-        return $this->dailySeries("
-            SELECT (data_servico AT TIME ZONE 'America/Sao_Paulo')::date AS data_ref,
-                   COUNT(*) AS total
-            FROM servicos
-            WHERE ativo = TRUE
-              AND status IN ('PENDENTE', 'EM_PROCESSO')
-              AND (data_servico AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-            GROUP BY 1
-        ");
-    }
-
-    private function faturamentoSparkline(): array
-    {
-        return $this->dailySeries("
-            SELECT data_ref, SUM(total) AS total
-            FROM (
-                SELECT (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date AS data_ref,
-                       COALESCE(SUM(valor_total), 0) AS total
-                FROM pedidos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-                GROUP BY 1
-
-                UNION ALL
-
-                SELECT (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date AS data_ref,
-                       COALESCE(SUM(valor_total), 0) AS total
-                FROM servicos
-                WHERE ativo = TRUE
-                  AND status = 'FATURADO'
-                  AND data_faturamento IS NOT NULL
-                  AND (data_faturamento AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN :inicio AND :fim
-                GROUP BY 1
-            ) faturamento
-            GROUP BY data_ref
-        ", true);
-    }
-
-    private function dailySeries(string $aggregateSql, bool $float = false): array
-    {
-        $start = new DateTimeImmutable('-6 days');
-        $end = new DateTimeImmutable('today');
-
-        $stmt = $this->pdo->prepare($aggregateSql);
-        $stmt->execute([
-            ':inicio' => $start->format('Y-m-d'),
-            ':fim' => $end->format('Y-m-d'),
-        ]);
-
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $indexed = [];
-        foreach ($rows as $row) {
-            $indexed[(string)$row['data_ref']] = $float
-                ? round((float)($row['total'] ?? 0), 2)
-                : (int)($row['total'] ?? 0);
-        }
-
-        $values = [];
-        foreach (new DatePeriod($start, new DateInterval('P1D'), 7) as $day) {
-            $key = $day->format('Y-m-d');
-            $values[] = $indexed[$key] ?? ($float ? 0.0 : 0);
-        }
-
-        return $values;
-    }
-
-    private function adminUrl(string $path): string
-    {
-        if (function_exists('tenantUrl')) {
-            return \tenantUrl($path);
-        }
-
-        return '/sistema_dm/public/' . ltrim($path, '/');
-    }
-
-    private function hasColumn(string $table, string $column): bool
-    {
-        $cacheKey = $table . '.' . $column;
-        if (array_key_exists($cacheKey, $this->columnCache)) {
-            return $this->columnCache[$cacheKey];
-        }
-
-        $stmt = $this->pdo->prepare("
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_schema = current_schema()
-              AND table_name = :table
-              AND column_name = :column
-            LIMIT 1
-        ");
-        $stmt->execute([
-            ':table' => $table,
-            ':column' => $column,
-        ]);
-
-        return $this->columnCache[$cacheKey] = (bool)$stmt->fetchColumn();
-    }
-
-    private function fetchAssoc(string $sql, array $params = []): array
-    {
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
-    }
-
-    private function scalar(string $sql, array $params = []): mixed
-    {
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        return $stmt->fetchColumn();
+        $period = strtoupper(trim($period));
+        $dias = match ($period) {
+            '7D' => 7,
+            '30D' => 30,
+            '90D' => 90,
+            default => 30,
+        };
+        $fim = new DateTimeImmutable('today');
+        $ini = $fim->modify('-' . ($dias - 1) . ' days');
+        return [$ini->format('Y-m-d'), $fim->format('Y-m-d')];
     }
 
     private function percentChange(float|int $current, float|int $previous): float
@@ -513,5 +249,13 @@ class DashboardApiService
         }
 
         return round((($current - $previous) / $previous) * 100, 2);
+    }
+
+    private function adminUrl(string $path): string
+    {
+        if (function_exists('tenantUrl')) {
+            return \tenantUrl($path);
+        }
+        return '/sistema_dm/public/' . ltrim($path, '/');
     }
 }

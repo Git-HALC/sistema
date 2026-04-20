@@ -78,9 +78,9 @@ class FormaPagamentoFinanceiroService
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO contas_receber
-                (cliente_id, forma_pagamento_id, valor, data_vencimento, descricao, status, categoria_dre_id, observacoes, pedido_id, servico_id, origem, created_at, updated_at)
+                (cliente_id, forma_pagamento_id, valor, data_vencimento, descricao, status, categoria_dre_id, observacoes, pedido_id, origem, created_at, updated_at)
             VALUES
-                (:cliente_id, :forma_pagamento_id, :valor, :data_vencimento, :descricao, 'PENDENTE', :categoria_dre_id, :observacoes, :pedido_id, :servico_id, :origem, NOW(), NOW())
+                (:cliente_id, :forma_pagamento_id, :valor, :data_vencimento, :descricao, 'PENDENTE', :categoria_dre_id, :observacoes, :pedido_id, :origem, NOW(), NOW())
             RETURNING id
         ");
 
@@ -93,7 +93,6 @@ class FormaPagamentoFinanceiroService
             ':categoria_dre_id' => $dados['categoria_dre_id'] ?? null,
             ':observacoes' => $dados['observacoes'] ?? null,
             ':pedido_id' => $dados['pedido_id'] ?? null,
-            ':servico_id' => $dados['servico_id'] ?? null,
             ':origem' => $dados['origem'] ?? 'ADQUIRENTE',
         ]);
 
@@ -104,9 +103,9 @@ class FormaPagamentoFinanceiroService
     {
         $stmt = $this->pdo->prepare("
             INSERT INTO contas_receber
-                (cliente_id, forma_pagamento_id, valor, data_vencimento, descricao, status, categoria_dre_id, observacoes, pedido_id, servico_id, origem, created_at, updated_at)
+                (cliente_id, forma_pagamento_id, valor, data_vencimento, descricao, status, categoria_dre_id, observacoes, pedido_id, origem, created_at, updated_at)
             VALUES
-                (:cliente_id, :forma_pagamento_id, :valor, :data_vencimento, :descricao, 'PENDENTE', :categoria_dre_id, :observacoes, :pedido_id, :servico_id, :origem, NOW(), NOW())
+                (:cliente_id, :forma_pagamento_id, :valor, :data_vencimento, :descricao, 'PENDENTE', :categoria_dre_id, :observacoes, :pedido_id, :origem, NOW(), NOW())
             RETURNING id
         ");
 
@@ -119,7 +118,6 @@ class FormaPagamentoFinanceiroService
             ':categoria_dre_id' => $dados['categoria_dre_id'] ?? null,
             ':observacoes' => $dados['observacoes'] ?? null,
             ':pedido_id' => $dados['pedido_id'] ?? null,
-            ':servico_id' => $dados['servico_id'] ?? null,
             ':origem' => $dados['origem'] ?? 'MANUAL',
         ]);
 
@@ -141,7 +139,6 @@ class FormaPagamentoFinanceiroService
             'data' => $dados['data'] ?? date('Y-m-d H:i:s'),
             'afeta_saldo' => true,
             'pedido_id' => $dados['pedido_id'] ?? null,
-            'servico_id' => $dados['servico_id'] ?? null,
         ]);
     }
 
@@ -175,9 +172,100 @@ class FormaPagamentoFinanceiroService
             'categoria_dre_id' => $contexto['categoria_dre_id'] ?? null,
             'observacoes' => $observacoes !== '' ? $observacoes : null,
             'pedido_id' => $contexto['pedido_id'] ?? null,
-            'servico_id' => $contexto['servico_id'] ?? null,
             'origem' => $contexto['origem'] ?? 'ADQUIRENTE',
         ]);
+    }
+
+    /**
+     * Aplica a taxa atual da forma em todos os CRs PENDENTE gerados como ADQUIRENTE
+     * daquela forma. Se a observação tiver "Taxa aplicada: X% (R$ Y)", reverte
+     * antes para obter o valor bruto original.
+     *
+     * @return array{atualizadas:int, total_taxa_nova:float}
+     */
+    public function aplicarTaxaEmCrsPendentes(int $formaPagamentoId): array
+    {
+        $forma = $this->buscarFormaDetalhada($formaPagamentoId);
+        $taxaNova = (float)($forma['taxa'] ?? 0);
+        $tipo = strtoupper((string)($forma['tipo'] ?? ''));
+        $adquirenteId = isset($forma['adquirente_id']) && $forma['adquirente_id'] !== ''
+            ? (int)$forma['adquirente_id'] : null;
+        $eCartao = in_array($tipo, [FormaPagamento::TIPO_CARTAO_CREDITO, FormaPagamento::TIPO_CARTAO_DEBITO], true);
+
+        $stmt = $this->pdo->prepare(
+            "SELECT id, valor, observacoes, cliente_id
+               FROM contas_receber
+              WHERE forma_pagamento_id = :fp
+                AND status IN ('PENDENTE', 'VENCIDO')"
+        );
+        $stmt->execute([':fp' => $formaPagamentoId]);
+        $crs = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $atualizadas = 0;
+        $totalTaxa = 0.0;
+
+        $update = $this->pdo->prepare(
+            "UPDATE contas_receber
+                SET valor = :valor,
+                    observacoes = :obs,
+                    cliente_id = :cliente_id,
+                    updated_at = NOW()
+              WHERE id = :id"
+        );
+
+        foreach ($crs as $cr) {
+            $valorAtual = (float)$cr['valor'];
+            $obs = (string)($cr['observacoes'] ?? '');
+
+            // Reverte taxa antiga se existir na observação
+            $valorBruto = $valorAtual;
+            if (preg_match('/Taxa aplicada:\s*[\d.,]+%\s*\(R\$\s*([\d.,]+)\)/i', $obs, $m)) {
+                $taxaAntiga = (float)str_replace(',', '.', $m[1]);
+                $valorBruto = round($valorAtual + $taxaAntiga, 2);
+                $obs = trim(preg_replace('/\s*Taxa aplicada:\s*[\d.,]+%\s*\(R\$\s*[\d.,]+\)\.?/i', '', $obs));
+            }
+
+            $valorTaxa = round($valorBruto * ($taxaNova / 100), 2);
+            $valorLiquido = round($valorBruto - $valorTaxa, 2);
+
+            if ($valorTaxa > 0) {
+                $obs = trim($obs . ' Taxa aplicada: ' .
+                    number_format($taxaNova, 2, '.', '') .
+                    '% (R$ ' . number_format($valorTaxa, 2, '.', '') . ').');
+            }
+
+            // Se for cartão, garante que cliente_id do CR seja a adquirente
+            $clienteAtualizado = $eCartao && $adquirenteId !== null
+                ? $adquirenteId
+                : ($cr['cliente_id'] !== null ? (int)$cr['cliente_id'] : null);
+
+            $update->execute([
+                ':valor' => $valorLiquido,
+                ':obs' => $obs !== '' ? $obs : null,
+                ':cliente_id' => $clienteAtualizado,
+                ':id' => (int)$cr['id'],
+            ]);
+
+            $atualizadas++;
+            $totalTaxa += $valorTaxa;
+        }
+
+        return [
+            'atualizadas' => $atualizadas,
+            'total_taxa_nova' => round($totalTaxa, 2),
+        ];
+    }
+
+    public function contarCrPendentes(int $formaPagamentoId): int
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT COUNT(*)
+               FROM contas_receber
+              WHERE forma_pagamento_id = :fp
+                AND status IN ('PENDENTE', 'VENCIDO')"
+        );
+        $stmt->execute([':fp' => $formaPagamentoId]);
+        return (int)$stmt->fetchColumn();
     }
 
     public function processarFaturamentoImediato(array $contexto): int
@@ -193,7 +281,6 @@ class FormaPagamentoFinanceiroService
             'forma_pagamento_id' => (int)$contexto['forma_pagamento_id'],
             'conta_receber_id' => $contexto['conta_receber_id'] ?? null,
             'pedido_id' => $contexto['pedido_id'] ?? null,
-            'servico_id' => $contexto['servico_id'] ?? null,
             'data' => $contexto['data_base'] ?? date('Y-m-d'),
             'origem' => $contexto['origem'] ?? FinanceiroService::ORIGEM_RECEBIMENTO,
         ]);

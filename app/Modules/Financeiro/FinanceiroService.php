@@ -58,7 +58,7 @@ class FinanceiroService
      * 
      * @param array $dados {
      *     @var int $conta_id (obrigat?rio) ID da conta banc?ria
-     *     @var string $tipo (obrigat?rio) 'Entrada' ou 'Sa?da'
+     *     @var string $tipo (obrigat?rio) 'Entrada' ou 'Saida'
      *     @var float $valor (obrigat?rio) Valor da movimenta??o > 0
      *     @var string $tipo_financeiro (obrigat?rio) 'RECEITA' ou 'DESPESA'
      *     @var string $origem (obrigat?rio) 'MANUAL|RECEBIMENTO|PAGAMENTO|ESTORNO'
@@ -84,7 +84,7 @@ class FinanceiroService
         if (empty($dados['conta_id'])) {
             throw new RuntimeException('conta_id ? obrigat?rio');
         }
-        if (empty($dados['tipo']) || !in_array($dados['tipo'], ['Entrada', 'Sa?da'])) {
+        if (empty($dados['tipo']) || !in_array($dados['tipo'], ['Entrada', 'Saida'])) {
             throw new RuntimeException('tipo deve ser "Entrada" ou "Sa?da"');
         }
         if (empty($dados['valor']) || (float)$dados['valor'] <= 0) {
@@ -108,7 +108,7 @@ class FinanceiroService
             if ($dados['tipo'] === 'Entrada' && $dados['tipo_financeiro'] !== self::TIPO_RECEITA) {
                 throw new RuntimeException('Entrada deve ter tipo_financeiro = RECEITA');
             }
-            if ($dados['tipo'] === 'Sa?da' && $dados['tipo_financeiro'] !== self::TIPO_DESPESA) {
+            if ($dados['tipo'] === 'Saida' && $dados['tipo_financeiro'] !== self::TIPO_DESPESA) {
                 throw new RuntimeException('Sa?da deve ter tipo_financeiro = DESPESA');
             }
         }
@@ -140,7 +140,6 @@ class FinanceiroService
         $contaReceberId = !empty($dados['conta_receber_id']) ? (int)$dados['conta_receber_id'] : null;
         $contaPagadoraId = !empty($dados['conta_pagar_id']) ? (int)$dados['conta_pagar_id'] : null;
         $pedidoId = !empty($dados['pedido_id']) ? (string)$dados['pedido_id'] : null;
-        $servicoId = !empty($dados['servico_id']) ? (string)$dados['servico_id'] : null;
         
         // Converter data para timestamp
         $data = $dados['data'] ?? new DateTime();
@@ -164,13 +163,27 @@ class FinanceiroService
             // Inserir movimenta??o
             $afetaSaldo = isset($dados['afeta_saldo']) ? (bool)$dados['afeta_saldo'] : true;
 
+            // R3 — Recebimento de CR / Pagamento de CP nao afetam DRE (so patrimonial).
+            // Apenas MANUAL, ESTORNO e VENDA_COMPETENCIA/TAXA_CARTAO afetam DRE por padrao.
+            $origem = (string)$dados['origem'];
+            if (array_key_exists('afeta_dre', $dados)) {
+                $afetaDre = (bool)$dados['afeta_dre'];
+            } else {
+                $afetaDre = !in_array($origem, [
+                    self::ORIGEM_RECEBIMENTO,
+                    self::ORIGEM_PAGAMENTO,
+                ], true);
+            }
+
             $stmt = $this->pdo->prepare("
                 INSERT INTO movimentacoes
                 (conta_id, tipo, valor, tipo_origem, data_movimentacao, descricao,
-                 categoria_dre_id, forma_pagamento_id, conta_receber_id, conta_pagar_id, pedido_id, servico_id, afeta_saldo, created_at)
+                 categoria_dre_id, forma_pagamento_id, conta_receber_id, conta_pagar_id, pedido_id,
+                 afeta_saldo, afeta_dre, created_at)
                 VALUES
                 (:conta_id, :tipo, :valor, :tipo_origem, :data_movimentacao, :descricao,
-                 :categoria_dre_id, :forma_pagamento_id, :conta_receber_id, :conta_pagar_id, :pedido_id, :servico_id, :afeta_saldo, NOW())
+                 :categoria_dre_id, :forma_pagamento_id, :conta_receber_id, :conta_pagar_id, :pedido_id,
+                 :afeta_saldo, :afeta_dre, NOW())
                 RETURNING id
             ");
 
@@ -186,8 +199,8 @@ class FinanceiroService
                 ':conta_receber_id' => $contaReceberId,
                 ':conta_pagar_id' => $contaPagadoraId,
                 ':pedido_id' => $pedidoId,
-                ':servico_id' => $servicoId,
                 ':afeta_saldo' => $afetaSaldo ? 'true' : 'false',
+                ':afeta_dre' => $afetaDre ? 'true' : 'false',
             ]);
             
             $movimentacaoId = $stmt->fetch(PDO::FETCH_COLUMN);
@@ -235,7 +248,7 @@ class FinanceiroService
         // - Para Recebimento: desconto ? ENTRADA em "Descontos Cedidos em Vendas" (Despesa)
         // - Para Pagamento: desconto ? ENTRADA em "Descontos Obtidos" (Dedu??o)
         
-        $tipoDesconto = $dados['tipo'] === 'Entrada' ? 'Sa?da' : 'Entrada';
+        $tipoDesconto = $dados['tipo'] === 'Entrada' ? 'Saida' : 'Entrada';
         $tipoFinanceiroDesconto = $dados['tipo'] === 'Entrada' ? 'DESPESA' : 'RECEITA';
         
         $movDesconto = $this->registrarMovimentacaoFinanceira([

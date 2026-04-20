@@ -149,6 +149,22 @@ $labelPorTipo = [
                 </div>
 
                 <div class="mb-3">
+                    <label class="form-label small text-muted mb-1 d-flex justify-content-between align-items-baseline">
+                        <span>Cliente <small class="text-muted" id="vrClienteHint">(opcional)</small></span>
+                        <small id="vrClienteReq" class="text-danger fw-semibold" style="display:none;">* Obrigatório</small>
+                    </label>
+                    <select id="vrCliente" name="cliente_id" class="form-select form-select-sm">
+                        <option value="">— Consumidor avulso —</option>
+                        <?php foreach (($clientes ?? []) as $c): ?>
+                            <option value="<?= (int)$c['id'] ?>">
+                                <?= htmlspecialchars((string)$c['nome']) ?>
+                                <?php if (!empty($c['cpf_cnpj'])): ?> · <?= htmlspecialchars((string)$c['cpf_cnpj']) ?><?php endif; ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="mb-3">
                     <label class="form-label small text-muted mb-1">Modo de venda</label>
                     <div class="vr-modo" id="vrModo">
                         <button type="button" class="btn btn-sm active" data-modo="pago_agora">
@@ -166,7 +182,9 @@ $labelPorTipo = [
                         <?php foreach ($formasPagamento as $fp):
                             $label = $labelPorTipo[$fp['tipo']] ?? (string)$fp['nome'];
                         ?>
-                            <button type="button" class="btn btn-outline-primary" data-id="<?= (int)$fp['id'] ?>">
+                            <button type="button" class="btn btn-outline-primary"
+                                    data-id="<?= (int)$fp['id'] ?>"
+                                    data-tipo="<?= htmlspecialchars((string)$fp['tipo']) ?>">
                                 <?= htmlspecialchars($label) ?>
                             </button>
                         <?php endforeach; ?>
@@ -217,7 +235,19 @@ $labelPorTipo = [
 
     const cart = new Map();
     let selectedFormaId = null;
+    let selectedFormaTipo = null;
     let modoVenda = 'pago_agora';
+    const clienteSel = $('vrCliente');
+    const clienteHint = $('vrClienteHint');
+    const clienteReq = $('vrClienteReq');
+
+    function atualizarStatusCliente() {
+        const precisa = modoVenda === 'cobrar_depois' || selectedFormaTipo === 'AF';
+        clienteHint.style.display = precisa ? 'none' : '';
+        clienteReq.style.display = precisa ? '' : 'none';
+        clienteSel.classList.toggle('is-invalid', precisa && !clienteSel.value);
+    }
+    clienteSel.addEventListener('change', () => { atualizarStatusCliente(); updateFinishState(); });
 
     function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch])); }
     function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
@@ -352,7 +382,9 @@ $labelPorTipo = [
         const b = e.target.closest('button[data-id]');
         if (!b) return;
         selectedFormaId = parseInt(b.dataset.id, 10);
+        selectedFormaTipo = b.dataset.tipo || null;
         payArea.querySelectorAll('button').forEach(x => x.classList.toggle('active', x === b));
+        atualizarStatusCliente();
         updateFinishState();
     });
 
@@ -365,25 +397,42 @@ $labelPorTipo = [
             payWrap.style.display = 'none';
             hintArea.style.display = '';
             selectedFormaId = null;
+            selectedFormaTipo = null;
             payArea.querySelectorAll('button').forEach(x => x.classList.remove('active'));
         } else {
             payWrap.style.display = '';
             hintArea.style.display = 'none';
         }
+        atualizarStatusCliente();
         updateFinishState();
     });
 
     function updateFinishState() {
         if (cart.size === 0) { btnFinish.disabled = true; return; }
+        const precisaCliente = modoVenda === 'cobrar_depois' || selectedFormaTipo === 'AF';
+        if (precisaCliente && !clienteSel.value) { btnFinish.disabled = true; return; }
         if (modoVenda === 'pago_agora') { btnFinish.disabled = !selectedFormaId; return; }
         btnFinish.disabled = false;
     }
 
     btnClear.addEventListener('click', () => {
         if (cart.size === 0) return;
-        if (!confirm('Limpar o carrinho?')) return;
-        cart.clear();
-        renderCart();
+        if (typeof Swal === 'undefined') {
+            if (!confirm('Limpar o carrinho?')) return;
+            cart.clear();
+            renderCart();
+            return;
+        }
+        Swal.fire({
+            title: 'Limpar carrinho?',
+            text: cart.size + ' item(ns) serão removidos.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Limpar',
+            cancelButtonText: 'Cancelar',
+            buttonsStyling: false,
+            customClass: { confirmButton: 'btn btn-warning mx-1', cancelButton: 'btn btn-outline-secondary mx-1' }
+        }).then(r => { if (r.isConfirmed) { cart.clear(); renderCart(); } });
     });
 
     btnFinish.addEventListener('click', finalizar);
@@ -404,6 +453,7 @@ $labelPorTipo = [
         }
         const body = {
             modo: modoVenda,
+            cliente_id: clienteSel.value ? parseInt(clienteSel.value, 10) : null,
             forma_pagamento_id: modoVenda === 'pago_agora' ? selectedFormaId : null,
             desconto_tipo: descTipo.value || null,
             desconto_valor: parseFloat(descValor.value) || 0,
@@ -434,6 +484,7 @@ $labelPorTipo = [
             swalOrAlert('Sucesso', msg, 'success');
             cart.clear();
             selectedFormaId = null;
+            selectedFormaTipo = null;
             descTipo.value = '';
             descValor.value = 0;
             descValor.disabled = true;
@@ -442,6 +493,8 @@ $labelPorTipo = [
             modoArea.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.modo === 'pago_agora'));
             payWrap.style.display = '';
             hintArea.style.display = 'none';
+            clienteSel.value = '';
+            atualizarStatusCliente();
             renderCart();
             search.focus();
         } catch (e) {

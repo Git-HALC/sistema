@@ -139,6 +139,7 @@ $tipos = [
             <form method="post" action="/sistema_dm/public/admin/financeiro/formas-pagamento.php" id="formFormaPagamento">
                 <input type="hidden" name="action" value="salvar">
                 <input type="hidden" name="id" id="form_id">
+                <input type="hidden" name="recalcular_cr_pendentes" id="form_recalcular" value="">
                 <div class="modal-body">
                     <div class="mb-3">
                         <label for="nome" class="form-label">Nome *</label>
@@ -298,6 +299,50 @@ $(document).ready(function () {
     $('#tipo').on('change', atualizarCamposPorTipo);
 
     $('#modalFormaPagamento').on('hidden.bs.modal', limparFormulario);
+
+    // Intercepta submit: se for edição de cartão com taxa > 0 e houver CR pendente,
+    // pergunta se deseja aplicar a nova taxa aos CRs existentes.
+    $('#formFormaPagamento').on('submit', function (e) {
+        const id = $('#form_id').val();
+        const tipo = $('#tipo').val();
+        const taxa = parseFloat(String($('#taxa').val() || '0').replace(',', '.'));
+        const jaConfirmou = $('#form_recalcular').val();
+
+        if (!id || !['CC', 'CD'].includes(tipo) || jaConfirmou !== '') {
+            return; // segue submit normal
+        }
+
+        e.preventDefault();
+
+        $.getJSON('/sistema_dm/public/admin/financeiro/formas-pagamento.php', { action: 'contar-cr-pendentes', id: id })
+            .done(function (resp) {
+                const total = (resp && resp.total) ? parseInt(resp.total, 10) : 0;
+                if (total === 0) {
+                    $('#form_recalcular').val('0');
+                    $('#formFormaPagamento').off('submit').trigger('submit');
+                    return;
+                }
+                Swal.fire({
+                    title: 'Atualizar contas a receber?',
+                    html: 'Existem <strong>' + total + '</strong> conta(s) a receber em aberto desta forma.<br>' +
+                          'Deseja aplicar a nova taxa de <strong>' + taxa.toFixed(2).replace('.', ',') + '%</strong> a elas?',
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonText: 'Sim, aplicar nova taxa',
+                    cancelButtonText: 'Nao, apenas salvar',
+                    buttonsStyling: false,
+                    customClass: { confirmButton: 'btn btn-success mx-1', cancelButton: 'btn btn-secondary mx-1' },
+                    reverseButtons: true,
+                }).then(function (result) {
+                    $('#form_recalcular').val(result.isConfirmed ? '1' : '0');
+                    $('#formFormaPagamento').off('submit').trigger('submit');
+                });
+            })
+            .fail(function () {
+                $('#form_recalcular').val('0');
+                $('#formFormaPagamento').off('submit').trigger('submit');
+            });
+    });
 
     limparFormulario();
 });

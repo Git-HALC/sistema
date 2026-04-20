@@ -49,7 +49,12 @@ class ContaReceberService
             return ['ok' => false, 'erros' => ['Selecione uma forma de pagamento.']];
         }
 
-        if (empty($dados['categoria_dre_id'])) {
+        // Categoria DRE so e obrigatoria para CR MANUAL. Auto-gerados (PDV, ADQUIRENTE, PEDIDO, SERVICO)
+        // ja tem sua receita reconhecida no ato da venda e a baixa nao afeta DRE (R3).
+        $atual = $this->repo->buscarPorId($id);
+        $origem = strtoupper((string)($atual['origem'] ?? 'MANUAL'));
+        $ehAutoGerado = in_array($origem, ['PDV', 'ADQUIRENTE', 'PEDIDO', 'SERVICO'], true);
+        if (!$ehAutoGerado && empty($dados['categoria_dre_id'])) {
             return ['ok' => false, 'erros' => ['Selecione uma categoria DRE (Receita).']];
         }
 

@@ -65,7 +65,7 @@ $labelPorTipo = [
                     </p>
 
                     <form method="POST" action="<?= htmlspecialchars($step2Url) ?>" autocomplete="off">
-                        <input type="hidden" name="_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                         <input type="hidden" name="action" value="step2">
 
                         <div class="row g-3">

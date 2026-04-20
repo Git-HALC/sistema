@@ -155,6 +155,14 @@ class ProdutoService
             $erros[] = 'O campo <strong>Nome</strong> é obrigatório.';
         }
 
+        if (empty($d['grupo_id'])) {
+            $erros[] = 'Selecione um <strong>Grupo</strong>.';
+        }
+
+        if (empty($d['subgrupo_id'])) {
+            $erros[] = 'Selecione um <strong>Subgrupo</strong>.';
+        }
+
         if (!in_array($d['unidade'] ?? '', Produto::UNIDADES, true)) {
             $erros[] = 'Unidade de medida inválida.';
         }

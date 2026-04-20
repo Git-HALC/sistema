@@ -14,11 +14,13 @@ class FormaPagamentoController
     private FormaPagamentoRepository $repo;
     private ContaRepository $contaRepo;
     private ClienteRepository $clienteRepo;
+    private PDO $pdo;
 
     private const BASE_URL = '/sistema_dm/public/admin/financeiro/formas-pagamento.php';
 
     public function __construct(PDO $pdo)
     {
+        $this->pdo = $pdo;
         $this->repo = new FormaPagamentoRepository($pdo);
         $this->service = new FormaPagamentoService($this->repo);
         $this->contaRepo = new ContaRepository($pdo);
@@ -38,6 +40,7 @@ class FormaPagamentoController
             'opcoes-json' => $this->opcoesJson(),
             'salvar'  => $this->salvar(),
             'excluir' => $this->excluir(),
+            'contar-cr-pendentes' => $this->contarCrPendentes(),
             default   => $this->index(),
         };
     }
@@ -87,13 +90,37 @@ class FormaPagamentoController
         if (!$resultado['ok']) {
             $this->flash('error', implode('<br>', $resultado['erros']));
         } else {
-            $this->flash(
-                'success',
-                $id ? 'Forma de pagamento atualizada com sucesso!' : 'Forma de pagamento criada com sucesso!'
-            );
+            $mensagem = $id ? 'Forma de pagamento atualizada com sucesso!' : 'Forma de pagamento criada com sucesso!';
+
+            if ($id && !empty($_POST['recalcular_cr_pendentes'])) {
+                try {
+                    $fpFinanceiroService = new FormaPagamentoFinanceiroService($this->pdo);
+                    $resumo = $fpFinanceiroService->aplicarTaxaEmCrsPendentes((int)$resultado['id']);
+                    $mensagem .= ' ' . $resumo['atualizadas'] . ' conta(s) a receber atualizada(s).';
+                } catch (\Throwable $e) {
+                    $mensagem .= ' (Falha ao atualizar CRs: ' . $e->getMessage() . ')';
+                }
+            }
+
+            $this->flash('success', $mensagem);
         }
 
         $this->redirecionar();
+    }
+
+    private function contarCrPendentes(): void
+    {
+        $id = !empty($_GET['id']) ? (int)$_GET['id'] : 0;
+        if (!$id) {
+            $this->json(['success' => false, 'total' => 0]);
+        }
+        try {
+            $fpFinanceiroService = new FormaPagamentoFinanceiroService($this->pdo);
+            $total = $fpFinanceiroService->contarCrPendentes($id);
+            $this->json(['success' => true, 'total' => $total]);
+        } catch (\Throwable $e) {
+            $this->json(['success' => false, 'total' => 0, 'message' => $e->getMessage()]);
+        }
     }
 
     private function excluir(): void

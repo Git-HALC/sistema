@@ -11,6 +11,11 @@ final class PdvRepository
     {
     }
 
+    public function pdo(): PDO
+    {
+        return $this->pdo;
+    }
+
     public function buscarUsuario(int $usuarioId): ?array
     {
         $stmt = $this->pdo->prepare(<<<'SQL'
@@ -283,6 +288,14 @@ final class PdvRepository
                 $condicoes[] = 'COALESCE(c.diferenca_total, 0) = 0';
             } elseif ($filtros['diferenca'] === 'divergente') {
                 $condicoes[] = 'COALESCE(c.diferenca_total, 0) <> 0';
+            }
+        }
+
+        if (!empty($filtros['conferencia'])) {
+            if ($filtros['conferencia'] === 'pendente') {
+                $condicoes[] = "c.status = 'fechado' AND COALESCE(c.conferencia_concluida, FALSE) = FALSE";
+            } elseif ($filtros['conferencia'] === 'concluida') {
+                $condicoes[] = 'COALESCE(c.conferencia_concluida, FALSE) = TRUE';
             }
         }
 

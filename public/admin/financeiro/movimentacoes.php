@@ -31,7 +31,7 @@ switch ($action) {
         $contas = $contaRepo->listar();
         $categoriasReceita = $catRepo->listar('Receita', true);
         // Para saídas, incluir múltiplos tipos de despesa
-        $categoriasDespesa = $catRepo->listar(['Dedução', 'CPV', 'Despesa Operacional', 'Despesa Financeira', 'Tributo'], true);
+        $categoriasDespesa = $catRepo->listar(['Deducao', 'CPV', 'Despesa Operacional', 'Despesa Financeira', 'Tributo', 'Outras'], true);
         
         // Debug: mostrar categorias carregadas
         error_log("Categorias Receita carregadas: " . count($categoriasReceita));
@@ -58,7 +58,7 @@ switch ($action) {
         $dataMovimentacao = $_POST['data_movimentacao'] ?? date('Y-m-d');
         $usuarioId = $_SESSION['user_id'] ?? null;
         
-        if (empty($tipo) || !in_array($tipo, ['Entrada', 'Saída'])) {
+        if (empty($tipo) || !in_array($tipo, ['Entrada', 'Saida'], true)) {
             $_SESSION['mensagem'] = ['tipo' => 'error', 'texto' => 'Tipo de movimentação inválido.'];
             header('Location: /sistema_dm/public/admin/financeiro/movimentacoes.php?action=novo');
             exit();
@@ -108,11 +108,14 @@ switch ($action) {
                 $dataMovimentacaoTimestamp = $dataMovimentacao . ' 00:00:00';
             }
             
-            // Inserir movimentação
-            $sql = "INSERT INTO movimentacoes 
-                    (conta_id, tipo, valor, descricao, categoria_dre_id, data_movimentacao)
-                    VALUES (:conta_id, :tipo, :valor, :descricao, :categoria_dre_id, :data_movimentacao)";
-            
+            // Inserir movimentação manual — afeta saldo do banco (afeta_saldo=TRUE)
+            // e compoe o DRE por competencia (afeta_dre=TRUE).
+            $sql = "INSERT INTO movimentacoes
+                    (conta_id, tipo, valor, descricao, categoria_dre_id, data_movimentacao,
+                     tipo_origem, afeta_saldo, afeta_dre, protegido)
+                    VALUES (:conta_id, :tipo, :valor, :descricao, :categoria_dre_id, :data_movimentacao,
+                            'MANUAL', TRUE, TRUE, FALSE)";
+
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 ':conta_id' => $contaId,
@@ -176,7 +179,7 @@ switch ($action) {
             exit();
         }
         
-        if (empty($tipo) || !in_array($tipo, ['Entrada', 'Saída'])) {
+        if (empty($tipo) || !in_array($tipo, ['Entrada', 'Saida'], true)) {
             $_SESSION['mensagem'] = ['tipo' => 'error', 'texto' => 'Tipo de movimentação inválido.'];
             header('Location: /sistema_dm/public/admin/financeiro/movimentacoes.php');
             exit();
@@ -597,7 +600,7 @@ switch ($action) {
         
         $contas = $contaRepo->listar();
         $categoriasReceita = $catRepo->listar('Receita', true);
-        $categoriasDespesa = $catRepo->listar(['Dedução', 'CPV', 'Despesa Operacional', 'Despesa Financeira', 'Tributo'], true);
+        $categoriasDespesa = $catRepo->listar(['Deducao', 'CPV', 'Despesa Operacional', 'Despesa Financeira', 'Tributo', 'Outras'], true);
         $titulo = 'Movimentações Financeiras';
         include __DIR__ . '/../../../app/views/financeiro/movimentacoes/index.php';
         break;

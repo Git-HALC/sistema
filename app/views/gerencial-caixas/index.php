@@ -26,6 +26,41 @@ $statusBadge = static function (?string $status): string {
     };
 };
 
+/** Classe e label do badge de conferencia (considera status do caixa + flag). */
+$conferenciaBadge = static function (array $caixa): array {
+    $status = strtolower((string) ($caixa['status'] ?? ''));
+    $concluida = !empty($caixa['conferencia_concluida']);
+    if ($status === 'aberto') {
+        return ['cls' => 'warning', 'label' => 'Caixa aberto', 'icon' => 'fa-door-open'];
+    }
+    if ($concluida) {
+        return ['cls' => 'success', 'label' => 'Conferido', 'icon' => 'fa-circle-check'];
+    }
+    return ['cls' => 'danger', 'label' => 'Aguardando conferencia', 'icon' => 'fa-triangle-exclamation'];
+};
+
+/** Destaca linha de caixa fechado ainda nao conferido. */
+$rowClass = static function (array $caixa): string {
+    $status = strtolower((string) ($caixa['status'] ?? ''));
+    $concluida = !empty($caixa['conferencia_concluida']);
+    if ($status === 'fechado' && !$concluida) {
+        return 'table-warning-subtle';
+    }
+    return '';
+};
+
+/* Highlight da linha nao conferida: amarelo suave compativel com dark mode */
+?>
+<style>
+    .table > tbody > tr.table-warning-subtle > td {
+        background-color: rgba(245, 158, 11, 0.08);
+    }
+    [data-bs-theme="dark"] .table > tbody > tr.table-warning-subtle > td {
+        background-color: rgba(251, 191, 36, 0.10);
+    }
+</style>
+<?php
+
 $valorMaximo = 0.0;
 foreach ($grafico as $item) {
     $valorMaximo = max($valorMaximo, (float) ($item['total_faturado'] ?? 0));
@@ -125,6 +160,14 @@ $temFiltros = array_filter($filtros, static fn ($valor): bool => trim((string) $
                             <option value="divergente" <?= ((string) ($filtros['diferenca'] ?? '') === 'divergente') ? 'selected' : '' ?>>Com diferenca</option>
                         </select>
                     </div>
+                    <div class="col-xl-2 col-md-6">
+                        <label class="form-label" for="filtro_conferencia">Conferencia</label>
+                        <select class="form-select" id="filtro_conferencia" name="conferencia">
+                            <option value="">Todas</option>
+                            <option value="pendente" <?= ((string) ($filtros['conferencia'] ?? '') === 'pendente') ? 'selected' : '' ?>>Aguardando</option>
+                            <option value="concluida" <?= ((string) ($filtros['conferencia'] ?? '') === 'concluida') ? 'selected' : '' ?>>Concluida</option>
+                        </select>
+                    </div>
                     <div class="col-xl-2 col-md-12">
                         <div class="d-flex gap-2">
                             <button type="submit" class="btn btn-primary flex-fill">Filtrar</button>
@@ -138,37 +181,40 @@ $temFiltros = array_filter($filtros, static fn ($valor): bool => trim((string) $
         </div>
     </div>
 
+    <?php
+    $totalGraficoHoje = 0.0;
+    foreach ($grafico as $it) $totalGraficoHoje += (float)($it['total_faturado'] ?? 0);
+    ?>
+    <?php if ($totalGraficoHoje > 0): ?>
     <div class="card border-0 shadow-sm mb-4">
-        <div class="card-header bg-white">
-            <span class="fw-semibold">Faturamento por caixa hoje</span>
+        <div class="card-header bg-white py-2">
+            <span class="fw-semibold"><i class="fas fa-chart-bar me-1 text-muted"></i> Faturamento por caixa hoje</span>
         </div>
         <div class="card-body">
-            <?php if ($grafico === []): ?>
-                <div class="text-muted">Nenhum caixa aberto hoje para compor o painel.</div>
-            <?php else: ?>
-                <div class="d-flex flex-column gap-3">
-                    <?php foreach ($grafico as $item): ?>
-                        <?php
-                        $valor = (float) ($item['total_faturado'] ?? 0);
-                        $percentual = $valorMaximo > 0 ? (int) round(($valor / $valorMaximo) * 100) : 0;
-                        ?>
-                        <div>
-                            <div class="d-flex justify-content-between align-items-center mb-1">
-                                <div class="fw-semibold">
-                                    Caixa #<?= (int) ($item['numero_caixa'] ?? 0) ?>
-                                    <span class="text-muted fw-normal">- <?= htmlspecialchars((string) ($item['operador_nome'] ?? '')) ?></span>
-                                </div>
-                                <div><?= htmlspecialchars($formatarMoeda($valor)) ?></div>
+            <div class="d-flex flex-column gap-3">
+                <?php foreach ($grafico as $item): ?>
+                    <?php
+                    $valor = (float) ($item['total_faturado'] ?? 0);
+                    if ($valor <= 0) continue;
+                    $percentual = $valorMaximo > 0 ? (int) round(($valor / $valorMaximo) * 100) : 0;
+                    ?>
+                    <div>
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <div class="small">
+                                <strong>Caixa #<?= (int) ($item['numero_caixa'] ?? 0) ?></strong>
+                                <span class="text-muted">· <?= htmlspecialchars((string) ($item['operador_nome'] ?? '')) ?></span>
                             </div>
-                            <div class="progress" role="progressbar" aria-valuenow="<?= $percentual ?>" aria-valuemin="0" aria-valuemax="100" style="height: 10px;">
-                                <div class="progress-bar" style="width: <?= $percentual ?>%;"></div>
-                            </div>
+                            <div class="fw-semibold text-success"><?= htmlspecialchars($formatarMoeda($valor)) ?></div>
                         </div>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
+                        <div class="progress" role="progressbar" style="height: 8px;">
+                            <div class="progress-bar bg-success" style="width: <?= $percentual ?>%;"></div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <div class="card border-0 shadow-sm">
         <div class="card-header bg-white">
@@ -187,6 +233,7 @@ $temFiltros = array_filter($filtros, static fn ($valor): bool => trim((string) $
                                 <th>Abertura</th>
                                 <th>Fechamento</th>
                                 <th>Status</th>
+                                <th>Conferencia</th>
                                 <th class="text-end">Lancado</th>
                                 <th class="text-end">Digitado</th>
                                 <th class="text-end">Diferenca</th>
@@ -195,8 +242,13 @@ $temFiltros = array_filter($filtros, static fn ($valor): bool => trim((string) $
                         </thead>
                         <tbody>
                             <?php foreach ($caixas as $caixa): ?>
-                                <?php $caixaId = (int) ($caixa['id'] ?? 0); ?>
-                                <tr>
+                                <?php
+                                    $caixaId = (int) ($caixa['id'] ?? 0);
+                                    $conf = $conferenciaBadge($caixa);
+                                    $rowCls = $rowClass($caixa);
+                                    $diferenca = (float) ($caixa['diferenca_total'] ?? 0);
+                                ?>
+                                <tr class="<?= htmlspecialchars($rowCls) ?>">
                                     <td class="fw-semibold">#<?= (int) ($caixa['numero_caixa'] ?? 0) ?></td>
                                     <td><?= htmlspecialchars((string) ($caixa['operador_nome'] ?? '')) ?></td>
                                     <td><?= htmlspecialchars($formatarDataHora($caixa['data_abertura'] ?? null)) ?></td>
@@ -206,12 +258,26 @@ $temFiltros = array_filter($filtros, static fn ($valor): bool => trim((string) $
                                             <?= htmlspecialchars(ucfirst((string) ($caixa['status'] ?? ''))) ?>
                                         </span>
                                     </td>
+                                    <td>
+                                        <span class="badge text-bg-<?= htmlspecialchars($conf['cls']) ?> d-inline-flex align-items-center gap-1">
+                                            <i class="fas <?= htmlspecialchars($conf['icon']) ?>"></i>
+                                            <?= htmlspecialchars($conf['label']) ?>
+                                        </span>
+                                    </td>
                                     <td class="text-end"><?= htmlspecialchars($formatarMoeda($caixa['total_lancado'] ?? 0)) ?></td>
                                     <td class="text-end"><?= htmlspecialchars($formatarMoeda($caixa['total_digitado'] ?? 0)) ?></td>
-                                    <td class="text-end"><?= htmlspecialchars($formatarMoeda($caixa['diferenca_total'] ?? 0)) ?></td>
+                                    <td class="text-end <?= abs($diferenca) > 0.009 ? 'text-danger fw-semibold' : '' ?>">
+                                        <?= htmlspecialchars($formatarMoeda($diferenca)) ?>
+                                    </td>
                                     <td class="text-end">
                                         <div class="btn-group btn-group-sm">
-                                            <a href="<?= htmlspecialchars(tenantCleanUrl('gerencial/caixas/' . $caixaId)) ?>" class="btn btn-outline-primary">Detalhe</a>
+                                            <a href="<?= htmlspecialchars(tenantCleanUrl('gerencial/caixas/' . $caixaId)) ?>" class="btn btn-outline-primary">
+                                                <?php if (strtolower((string) ($caixa['status'] ?? '')) === 'fechado' && empty($caixa['conferencia_concluida'])): ?>
+                                                    <i class="fas fa-gavel me-1"></i>Conferir
+                                                <?php else: ?>
+                                                    Detalhe
+                                                <?php endif; ?>
+                                            </a>
                                             <a href="<?= htmlspecialchars(tenantCleanUrl('gerencial/caixas/' . $caixaId . '/pdf')) ?>" class="btn btn-outline-secondary">PDF</a>
                                             <a href="<?= htmlspecialchars(tenantCleanUrl('gerencial/caixas/' . $caixaId . '/termica')) ?>" class="btn btn-outline-secondary">Termica</a>
                                         </div>

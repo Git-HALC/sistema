@@ -107,7 +107,7 @@ $(document).ready(function() {
                 categoriaSelect.append(`<option value="${cat.id}">${cat.nome}</option>`);
             });
             console.log('Carregadas', categoriasReceita.length, 'categorias de receita');
-        } else if (tipo === 'Saída') {
+        } else if (tipo === 'Saida') {
             categoriaSelect.append('<option value="">Selecione...</option>');
             categoriasDespesa.forEach(function(cat) {
                 categoriaSelect.append(`<option value="${cat.id}">${cat.nome}</option>`);

@@ -31,7 +31,7 @@ class ClienteRepository
                 $select[] = $col;
             }
         }
-        $select = array_merge($select, ['cidade', 'estado', 'codigo_municipio', 'ie', 'ind_ie_dest', 'ativo', 'created_at', 'updated_at']);
+        $select = array_merge($select, ['cidade', 'estado', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias', 'ativo', 'created_at', 'updated_at']);
 
         $stmt = $this->pdo->prepare("
             SELECT " . implode(', ', $select) . "
@@ -92,7 +92,7 @@ class ClienteRepository
                 $select[] = $col;
             }
         }
-        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest'] as $col) {
+        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias'] as $col) {
             if (isset($cols[$col])) {
                 $select[] = $col;
             }
@@ -146,7 +146,7 @@ class ClienteRepository
                 $campos[] = $col;
             }
         }
-        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest'] as $col) {
+        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias'] as $col) {
             if (isset($cols[$col])) {
                 $campos[] = $col;
             }
@@ -171,7 +171,7 @@ class ClienteRepository
                 $payload[':' . $col] = $this->boolToPg(!empty($dados[$col]));
             }
         }
-        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest'] as $col) {
+        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias'] as $col) {
             if (isset($cols[$col])) {
                 $payload[':' . $col] = $dados[$col] ?? null;
             }
@@ -207,7 +207,7 @@ class ClienteRepository
                 $sets[] = $col . ' = :' . $col;
             }
         }
-        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest'] as $col) {
+        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias'] as $col) {
             if (isset($cols[$col])) {
                 $sets[] = $col . ' = :' . $col;
             }
@@ -228,7 +228,7 @@ class ClienteRepository
                 $payload[':' . $col] = $this->boolToPg(!empty($dados[$col]));
             }
         }
-        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest'] as $col) {
+        foreach (['logradouro', 'numero_endereco', 'complemento', 'bairro', 'cep', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias'] as $col) {
             if (isset($cols[$col])) {
                 $payload[':' . $col] = $dados[$col] ?? null;
             }
@@ -253,7 +253,7 @@ class ClienteRepository
                 $select[] = $col;
             }
         }
-        $select = array_merge($select, ['cidade', 'estado', 'codigo_municipio', 'ie', 'ind_ie_dest', 'ativo', 'created_at', 'updated_at']);
+        $select = array_merge($select, ['cidade', 'estado', 'codigo_municipio', 'ie', 'ind_ie_dest', 'prazo_faturamento_dias', 'ativo', 'created_at', 'updated_at']);
 
         $stmt = $this->pdo->prepare("
             SELECT " . implode(', ', $select) . "

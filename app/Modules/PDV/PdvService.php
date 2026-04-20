@@ -192,24 +192,61 @@ final class PdvService
         }
 
         $lancamentos = $this->repository->listarLancamentosDetalhados($caixaId);
-        $sistema = [
-            'dinheiro' => (float) ($caixa['sistema_dinheiro'] ?? 0),
-            'cartao' => (float) ($caixa['sistema_cartao'] ?? 0),
-            'pix' => (float) ($caixa['sistema_pix'] ?? 0),
-            'a_faturar' => (float) ($caixa['sistema_faturar'] ?? 0),
-        ];
-        $operador = [
-            'dinheiro' => (float) ($caixa['fechamento_dinheiro'] ?? 0),
-            'cartao' => (float) ($caixa['fechamento_cartao'] ?? 0),
-            'pix' => (float) ($caixa['fechamento_pix'] ?? 0),
-            'a_faturar' => (float) ($caixa['fechamento_faturar'] ?? 0),
-        ];
-        $diferencas = [
-            'dinheiro' => (float) ($caixa['diferenca_dinheiro'] ?? 0),
-            'cartao' => (float) ($caixa['diferenca_cartao'] ?? 0),
-            'pix' => (float) ($caixa['diferenca_pix'] ?? 0),
-            'a_faturar' => (float) ($caixa['diferenca_faturar'] ?? 0),
-        ];
+
+        // Agrega pdv_conferencia_itens (fluxo novo às cegas) por bucket visual:
+        // D → dinheiro | CC/CD → cartao | PIX → pix | AF/BOL/TB → a_faturar
+        $buckets = ['dinheiro' => 'D', 'cartao' => ['CC', 'CD'], 'pix' => 'PIX', 'a_faturar' => ['AF', 'BOL', 'TB']];
+        $sistema = ['dinheiro' => 0.0, 'cartao' => 0.0, 'pix' => 0.0, 'a_faturar' => 0.0];
+        $operador = ['dinheiro' => 0.0, 'cartao' => 0.0, 'pix' => 0.0, 'a_faturar' => 0.0];
+        $diferencas = ['dinheiro' => 0.0, 'cartao' => 0.0, 'pix' => 0.0, 'a_faturar' => 0.0];
+
+        $stmt = $this->repository->pdo()->prepare(
+            "SELECT fp.tipo, ci.valor_sistema, ci.valor_informado, ci.diferenca
+               FROM pdv_conferencia_itens ci
+               INNER JOIN formas_pagamento fp ON fp.id = ci.forma_pagamento_id
+              WHERE ci.caixa_id = :id"
+        );
+        $stmt->execute([':id' => $caixaId]);
+        $temConferencia = false;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $temConferencia = true;
+            $tipo = (string)$r['tipo'];
+            $key = null;
+            foreach ($buckets as $bucketKey => $tipos) {
+                $tiposArr = is_array($tipos) ? $tipos : [$tipos];
+                if (in_array($tipo, $tiposArr, true)) { $key = $bucketKey; break; }
+            }
+            if ($key === null) continue;
+            $sistema[$key] += (float)$r['valor_sistema'];
+            $operador[$key] += (float)$r['valor_informado'];
+            $diferencas[$key] += (float)$r['diferenca'];
+        }
+
+        // Se ainda nao ha conferencia, calcula SISTEMA ao vivo a partir das vendas
+        // do caixa (operador fica zero ate o fechamento as cegas).
+        if (!$temConferencia) {
+            $stmtAoVivo = $this->repository->pdo()->prepare(
+                "SELECT fp.tipo, COALESCE(SUM(v.valor_total), 0) AS total
+                   FROM pdv_vendas v
+                   INNER JOIN formas_pagamento fp ON fp.id = v.forma_pagamento_id
+                  WHERE v.caixa_id = :id AND v.status = 'faturado'
+                  GROUP BY fp.tipo"
+            );
+            $stmtAoVivo->execute([':id' => $caixaId]);
+            foreach ($stmtAoVivo->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+                $tipo = (string)$r['tipo'];
+                foreach ($buckets as $bucketKey => $tipos) {
+                    $tiposArr = is_array($tipos) ? $tipos : [$tipos];
+                    if (in_array($tipo, $tiposArr, true)) {
+                        $sistema[$bucketKey] += (float)$r['total'];
+                        break;
+                    }
+                }
+            }
+        }
+
+        $totalSistema = round(array_sum($sistema), 2);
+        $totalOperador = round(array_sum($operador), 2);
 
         return [
             'caixa' => $caixa,
@@ -217,9 +254,11 @@ final class PdvService
             'sistema' => $sistema,
             'operador' => $operador,
             'diferencas' => $diferencas,
-            'total_sistema' => round(array_sum($sistema), 2),
-            'total_operador' => round(array_sum($operador), 2),
-            'diferenca_total' => (float) ($caixa['diferenca_total'] ?? 0),
+            'total_sistema' => $totalSistema,
+            'total_operador' => $totalOperador,
+            'diferenca_total' => $temConferencia
+                ? round($totalOperador - $totalSistema, 2)
+                : (float)($caixa['diferenca_total'] ?? 0),
         ];
     }
 

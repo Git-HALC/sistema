@@ -265,6 +265,11 @@ final class PdvVendaController
 
         $formas = $this->repo->listarFormasPagamentoAtivas();
 
+        $stmtClientes = $this->pdo->query(
+            "SELECT id, nome, cpf_cnpj FROM clientes WHERE ativo = TRUE AND eh_cliente = TRUE ORDER BY nome"
+        );
+        $clientes = $stmtClientes->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+
         $GLOBALS['__dm_layout_mode'] = 'pdv';
         $GLOBALS['__dm_pdv_active'] = 'venda';
         $GLOBALS['__dm_pdv_caixa_resumo'] = $caixa;
@@ -273,6 +278,7 @@ final class PdvVendaController
             'page_title' => 'Venda Rápida',
             'caixa' => $caixa,
             'formasPagamento' => $formas,
+            'clientes' => $clientes,
             'csrfToken' => CsrfProtection::token(),
         ];
 
@@ -326,7 +332,8 @@ final class PdvVendaController
             'caixa_id' => (int)$caixa['id'],
             'usuario_id' => $usuarioId,
             'cliente_id' => !empty($body['cliente_id']) ? (int)$body['cliente_id'] : null,
-            'forma_pagamento_id' => (int)($body['forma_pagamento_id'] ?? 0),
+            'modo' => (string)($body['modo'] ?? 'pago_agora'),
+            'forma_pagamento_id' => !empty($body['forma_pagamento_id']) ? (int)$body['forma_pagamento_id'] : null,
             'desconto_tipo' => $body['desconto_tipo'] ?? null,
             'desconto_valor' => (float)($body['desconto_valor'] ?? 0),
             'observacoes' => isset($body['observacoes']) ? (string)$body['observacoes'] : null,

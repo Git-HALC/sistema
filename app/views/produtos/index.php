@@ -11,9 +11,18 @@ $produtoNovoUrl = function_exists('dmBuildUrl')
 ?>
 <div class="container-fluid">
 
+    <?php $pdvReadonly = !empty($GLOBALS['__dm_pdv_readonly']); ?>
     <!-- Cabeçalho -->
     <div class="d-flex justify-content-between align-items-center mt-3 mb-3">
-        <h1 class="h3 mb-0 text-gray-800">Produtos</h1>
+        <h1 class="h3 mb-0 text-gray-800">
+            Produtos
+            <?php if ($pdvReadonly): ?>
+                <span class="badge bg-info text-dark ms-2" style="font-size:.55em; vertical-align:middle;">
+                    <i class="fas fa-eye"></i> Consulta
+                </span>
+            <?php endif; ?>
+        </h1>
+        <?php if (!$pdvReadonly): ?>
         <div class="d-flex gap-2">
             <a href="<?php echo htmlspecialchars($produtoInventarioUrl); ?>" class="btn btn-outline-secondary btn-sm">
                 <i class="fas fa-boxes me-1"></i> Inventário de Estoque
@@ -25,6 +34,7 @@ $produtoNovoUrl = function_exists('dmBuildUrl')
                 <i class="fas fa-plus me-1"></i> Novo Produto
             </a>
         </div>
+        <?php endif; ?>
     </div>
 
     <!-- Flash messages -->
@@ -105,6 +115,9 @@ $produtoNovoUrl = function_exists('dmBuildUrl')
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-center">
+                                    <?php if ($pdvReadonly): ?>
+                                        <span class="text-muted small"><i class="fas fa-eye"></i> Consulta</span>
+                                    <?php else: ?>
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="<?php echo htmlspecialchars(function_exists('dmBuildUrl') ? dmBuildUrl($produtoBaseUrl, 'action=editar&id=' . urlencode((string)$p['id'])) : $produtoBaseUrl . '?action=editar&id=' . urlencode((string)$p['id'])); ?>"
                                            class="btn btn-outline-primary" title="Editar">
@@ -117,6 +130,7 @@ $produtoNovoUrl = function_exists('dmBuildUrl')
                                             <i class="fas fa-trash"></i>
                                         </button>
                                     </div>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                             <?php endforeach; ?>

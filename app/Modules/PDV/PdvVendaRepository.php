@@ -238,6 +238,138 @@ final class PdvVendaRepository
     }
 
     /**
+     * Verifica estoque. IMPORTANTE: deve ser chamado DENTRO de uma transacao
+     * ativa se o proximo passo for consumir o estoque (gera SELECT FOR UPDATE
+     * que bloqueia outras transacoes concorrentes para o mesmo produto).
+     *
+     * @param array<int, array{produto_id:?int, quantidade:float}> $itensProduto
+     * @return array<int, array{produto_id:int, nome:string, solicitado:float, disponivel:float}>
+     */
+    public function verificarEstoque(array $itensProduto): array
+    {
+        if ($itensProduto === []) return [];
+
+        $somaPorProduto = [];
+        foreach ($itensProduto as $i) {
+            $pid = isset($i['produto_id']) ? (int)$i['produto_id'] : 0;
+            if ($pid <= 0) continue;
+            $somaPorProduto[$pid] = ($somaPorProduto[$pid] ?? 0) + (float)($i['quantidade'] ?? 0);
+        }
+        if ($somaPorProduto === []) return [];
+
+        // Prepared statement com placeholders dinamicos para IN (...)
+        $ids = array_keys($somaPorProduto);
+        $placeholders = [];
+        $params = [];
+        foreach ($ids as $idx => $pid) {
+            $key = ':pid' . $idx;
+            $placeholders[] = $key;
+            $params[$key] = $pid;
+        }
+        $inSql = implode(',', $placeholders);
+
+        // FOR UPDATE quando estiver dentro de transacao — evita race condition
+        $forUpdate = $this->pdo->inTransaction() ? ' FOR UPDATE' : '';
+        $stmt = $this->pdo->prepare(
+            "SELECT id, nome, estoque_atual FROM produtos WHERE id IN ($inSql)" . $forUpdate
+        );
+        $stmt->execute($params);
+
+        $faltantes = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
+            $pid = (int)$p['id'];
+            $disp = (float)$p['estoque_atual'];
+            $req = (float)($somaPorProduto[$pid] ?? 0);
+            if ($disp < $req) {
+                $faltantes[] = [
+                    'produto_id' => $pid,
+                    'nome' => (string)$p['nome'],
+                    'solicitado' => $req,
+                    'disponivel' => $disp,
+                ];
+            }
+        }
+        return $faltantes;
+    }
+
+    /** Restaura estoque (ENTRADA) — usado ao cancelar venda faturada. */
+    public function restaurarEstoque(int $produtoId, float $quantidade, int $usuarioId, int $vendaId): void
+    {
+        $stmtAtual = $this->pdo->prepare('SELECT estoque_atual FROM produtos WHERE id = :id FOR UPDATE');
+        $stmtAtual->execute([':id' => $produtoId]);
+        $anterior = (float)$stmtAtual->fetchColumn();
+        $posterior = $anterior + $quantidade;
+
+        $this->pdo->prepare('UPDATE produtos SET estoque_atual = :pos WHERE id = :id')
+            ->execute([':pos' => $posterior, ':id' => $produtoId]);
+
+        $this->pdo->prepare(
+            "INSERT INTO produto_estoque_movimentacoes
+                (produto_id, usuario_id, tipo, origem, referencia_tipo, referencia_id,
+                 quantidade, estoque_anterior, estoque_posterior, observacao)
+             VALUES
+                (:pid, :uid, 'ENTRADA', 'PDV', 'CANCELAMENTO_VENDA', :ref, :qtd, :ant, :pos, :obs)"
+        )->execute([
+            ':pid' => $produtoId,
+            ':uid' => $usuarioId,
+            ':ref' => (string)$vendaId,
+            ':qtd' => $quantidade,
+            ':ant' => $anterior,
+            ':pos' => $posterior,
+            ':obs' => 'Estorno venda PDV #' . $vendaId,
+        ]);
+    }
+
+    public function deduzirEstoque(int $produtoId, float $quantidade, int $usuarioId, int $vendaId): void
+    {
+        // Captura estoque atual com lock
+        $stmtAtual = $this->pdo->prepare('SELECT estoque_atual FROM produtos WHERE id = :id FOR UPDATE');
+        $stmtAtual->execute([':id' => $produtoId]);
+        $anterior = (float)$stmtAtual->fetchColumn();
+        $posterior = $anterior - $quantidade;
+        if ($posterior < 0) {
+            throw new \RuntimeException('Estoque insuficiente para o produto id=' . $produtoId);
+        }
+
+        $this->pdo->prepare('UPDATE produtos SET estoque_atual = :pos WHERE id = :id')
+            ->execute([':pos' => $posterior, ':id' => $produtoId]);
+
+        $this->pdo->prepare(
+            "INSERT INTO produto_estoque_movimentacoes
+                (produto_id, usuario_id, tipo, origem, referencia_tipo, referencia_id,
+                 quantidade, estoque_anterior, estoque_posterior, observacao)
+             VALUES
+                (:pid, :uid, 'SAIDA', 'PDV', 'VENDA_PDV', :ref, :qtd, :ant, :pos,
+                 :obs)"
+        )->execute([
+            ':pid' => $produtoId,
+            ':uid' => $usuarioId,
+            ':ref' => (string)$vendaId,
+            ':qtd' => $quantidade,
+            ':ant' => $anterior,
+            ':pos' => $posterior,
+            ':obs' => 'Venda PDV #' . $vendaId,
+        ]);
+    }
+
+    /**
+     * Itens produto de uma venda (usado para deduzir estoque ao mover para faturado).
+     * @return array<int, array{produto_id:int, quantidade:float}>
+     */
+    public function itensProdutoDaVenda(int $vendaId): array
+    {
+        $stmt = $this->pdo->prepare(
+            "SELECT produto_id, quantidade
+               FROM pdv_venda_itens
+              WHERE venda_id = :id
+                AND tipo_item = 'PRODUTO'
+                AND produto_id IS NOT NULL"
+        );
+        $stmt->execute([':id' => $vendaId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
      * Vendas no Kanban (origem=fluxo, não canceladas), agrupadas por status.
      *
      * @return array<string, array<int, array<string,mixed>>>

@@ -82,11 +82,15 @@ class ProdutosController
 
     private function novoForm(): void
     {
+        $grupoRepo = new ProdutoGrupoRepository($this->pdo);
         $this->view('produtos/form', [
-            'page_title' => 'Novo Produto',
-            'produto'    => new Produto(),
-            'fiscal'     => null,
-            'editando'   => false,
+            'page_title'    => 'Novo Produto',
+            'produto'       => new Produto(),
+            'fiscal'        => null,
+            'editando'      => false,
+            'grupos'        => $grupoRepo->ativosParaSelect(),
+            'subgruposInit' => [],
+            'csrfToken'     => \App\Support\CsrfProtection::token(),
         ]);
     }
 
@@ -99,11 +103,18 @@ class ProdutosController
             $this->redirecionar();
         }
 
+        $grupoRepo = new ProdutoGrupoRepository($this->pdo);
+        $subgrupoRepo = new ProdutoSubgrupoRepository($this->pdo);
+        $grupoId = (int)($resultado['produto']->grupo_id ?? 0);
+
         $this->view('produtos/form', [
-            'page_title' => 'Editar Produto',
-            'produto'    => $resultado['produto'],
-            'fiscal'     => $resultado['fiscal'],
-            'editando'   => true,
+            'page_title'    => 'Editar Produto',
+            'produto'       => $resultado['produto'],
+            'fiscal'        => $resultado['fiscal'],
+            'editando'      => true,
+            'grupos'        => $grupoRepo->ativosParaSelect(),
+            'subgruposInit' => $grupoId > 0 ? $subgrupoRepo->porGrupoAtivos($grupoId) : [],
+            'csrfToken'     => \App\Support\CsrfProtection::token(),
         ]);
     }
 
@@ -126,6 +137,8 @@ class ProdutosController
             'estoque_atual'  => $this->float($_POST['estoque_atual']  ?? 0),
             'estoque_minimo' => $this->float($_POST['estoque_minimo'] ?? 0),
             'ativo'          => isset($_POST['ativo']),
+            'grupo_id'       => !empty($_POST['grupo_id']) ? (int)$_POST['grupo_id'] : null,
+            'subgrupo_id'    => !empty($_POST['subgrupo_id']) ? (int)$_POST['subgrupo_id'] : null,
         ];
 
         $dadosFiscais = [

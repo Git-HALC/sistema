@@ -219,7 +219,7 @@ class ContaPagarRepository
                 // Registrar pagamento como DESPESA
                 $this->financeiroService->registrarMovimentacaoFinanceira([
                     'conta_id' => $contaId,
-                    'tipo' => 'Sa?da',
+                    'tipo' => 'Saida',
                     'valor' => $valorPago,
                     'tipo_financeiro' => 'DESPESA',
                     'origem' => 'PAGAMENTO',
@@ -290,7 +290,7 @@ class ContaPagarRepository
                 INSERT INTO " . self::TABLE_MOV . "
                     (conta_id, tipo, valor, desconto, data_movimentacao, descricao, categoria_dre_id, conta_pagar_id)
                 VALUES
-                    (:conta_id, 'Sa?da', :valor, :desconto, :data_movimentacao, :descricao, :categoria_dre_id, :conta_pagar_id)
+                    (:conta_id, 'Saida', :valor, :desconto, :data_movimentacao, :descricao, :categoria_dre_id, :conta_pagar_id)
             ");
             $stmtMov->execute([
                 ':conta_id' => $contaId,
@@ -400,7 +400,7 @@ class ContaPagarRepository
                 $stmtUltima = $this->pdo->prepare("
                     SELECT id, valor, desconto
                     FROM " . self::TABLE_MOV . "
-                    WHERE conta_pagar_id = :id AND tipo = 'Sa?da'
+                    WHERE conta_pagar_id = :id AND tipo = 'Saida'
                     ORDER BY created_at DESC, id DESC
                     LIMIT 1
                 ");

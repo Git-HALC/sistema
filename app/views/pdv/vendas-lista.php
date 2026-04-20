@@ -208,6 +208,9 @@ $statusBadge = [
                                                 <i class="fas fa-ban"></i>
                                             </button>
                                         <?php endif; ?>
+                                        <?php if ($v['status'] === 'faturado'): ?>
+                                            <span class="fiscal-actions" data-venda-id="<?= (int)$v['id'] ?>"></span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -379,6 +382,74 @@ $statusBadge = [
             alert('Erro de rede');
             cancelConfirm.disabled = false;
         }
+    });
+})();
+</script>
+
+<script>
+// Fiscal: popula botoes NFC-e/NFS-e condicionais por venda
+(function(){
+    const FISCAL_ENDPOINT = '/sistema_dm/public/admin/fiscal/emitir.php';
+    const CSRF = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+    function brl(v){ return (Number(v)||0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'}); }
+
+    document.querySelectorAll('.fiscal-actions').forEach(function(wrap){
+        const vendaId = wrap.dataset.vendaId;
+        fetch(FISCAL_ENDPOINT + '?action=estado-venda&venda_id=' + encodeURIComponent(vendaId))
+            .then(r => r.json()).then(function(data){
+                if (!data || !data.ok) return;
+                const parts = [];
+                if (data.tem_produto) {
+                    if (data.nfce && data.nfce.status === 'autorizada') {
+                        parts.push('<span class="badge bg-success ms-1" title="NFC-e '+data.nfce.numero+'"><i class="fas fa-check me-1"></i>NFC-e</span>');
+                    } else {
+                        parts.push('<button type="button" class="btn btn-sm btn-primary ms-1 btn-emitir-fiscal" data-tipo="nfce" data-venda="'+vendaId+'" title="Emitir NFC-e ('+brl(data.total_produtos)+')"><i class="fas fa-file-invoice me-1"></i>NFC-e</button>');
+                    }
+                }
+                if (data.tem_servico) {
+                    if (data.nfse && data.nfse.status === 'autorizada') {
+                        parts.push('<span class="badge bg-success ms-1" title="NFS-e '+(data.nfse.numero_nfse||data.nfse.numero_rps)+'"><i class="fas fa-check me-1"></i>NFS-e</span>');
+                    } else {
+                        parts.push('<button type="button" class="btn btn-sm btn-info ms-1 btn-emitir-fiscal" data-tipo="nfse" data-venda="'+vendaId+'" title="Emitir NFS-e ('+brl(data.total_servicos)+')"><i class="fas fa-file-contract me-1"></i>NFS-e</button>');
+                    }
+                }
+                wrap.innerHTML = parts.join('');
+                wrap.querySelectorAll('.btn-emitir-fiscal').forEach(function(btn){
+                    btn.addEventListener('click', function(){
+                        const tipo = btn.dataset.tipo;
+                        const vid = btn.dataset.venda;
+                        Swal.fire({
+                            title: 'Emitir ' + (tipo==='nfce' ? 'NFC-e' : 'NFS-e') + '?',
+                            text: 'Venda #' + vid,
+                            icon: 'question',
+                            showCancelButton: true,
+                            confirmButtonText: 'Sim, emitir',
+                            cancelButtonText: 'Cancelar',
+                            buttonsStyling: false,
+                            customClass: { confirmButton: 'btn btn-success mx-1', cancelButton: 'btn btn-secondary mx-1' }
+                        }).then(function(r){
+                            if (!r.isConfirmed) return;
+                            btn.disabled = true;
+                            const fd = new FormData();
+                            fd.append('action', 'emitir-' + tipo);
+                            fd.append('venda_id', vid);
+                            fd.append('csrf_token', CSRF);
+                            fetch(FISCAL_ENDPOINT, { method:'POST', body: fd, headers:{ 'X-CSRF-Token': CSRF } })
+                                .then(rr => rr.json().catch(() => ({ok:false, erro:'Resposta invalida'})))
+                                .then(data => {
+                                    Swal.fire({
+                                        icon: data.ok ? 'success' : 'error',
+                                        title: data.ok ? 'Emitida' : 'Falha',
+                                        html: '<pre class="text-start small mb-0">' + JSON.stringify(data, null, 2) + '</pre>',
+                                        buttonsStyling: false,
+                                        customClass: { confirmButton: 'btn btn-' + (data.ok ? 'success' : 'danger') }
+                                    }).then(() => { if (data.ok) location.reload(); else btn.disabled = false; });
+                                });
+                        });
+                    });
+                });
+            });
     });
 })();
 </script>

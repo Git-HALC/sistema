@@ -99,8 +99,20 @@ include __DIR__ . '/../../../public/includes/header.php';
                         </div>
                         <small class="form-text text-muted">Pode marcar um ou os dois perfis.</small>
                     </div>
+                    <div class="form-group col-md-3">
+                        <label for="prazo_faturamento_dias">
+                            Prazo de faturamento <small class="text-muted">(dias)</small>
+                        </label>
+                        <?php $prazoFat = (int)($cliente['prazo_faturamento_dias'] ?? ($_SESSION['form_data']['prazo_faturamento_dias'] ?? 0)); ?>
+                        <input type="number" min="0" max="365" step="1"
+                               class="form-control" id="prazo_faturamento_dias" name="prazo_faturamento_dias"
+                               value="<?php echo $prazoFat; ?>">
+                        <small class="form-text text-muted">
+                            Usado em vendas <strong>A Faturar</strong>. Deixe <strong>0</strong> para 30 dias automáticos.
+                        </small>
+                    </div>
                 </div>
-                
+
                 <div class="form-row">
                     <div class="form-group col-md-8">
                         <label for="logradouro">Logradouro</label>

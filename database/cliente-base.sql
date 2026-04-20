@@ -482,8 +482,12 @@ CREATE TABLE public.categorias_dre (
     ativo boolean DEFAULT true,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    codigo character varying(10),
     CONSTRAINT categorias_dre_tipo_check CHECK (((tipo)::text = ANY ((ARRAY['Receita'::character varying, 'Despesa'::character varying, 'Deducao'::character varying, 'CPV'::character varying, 'Despesa Operacional'::character varying, 'Despesa Financeira'::character varying, 'Tributo'::character varying, 'Outras'::character varying])::text[])))
 );
+
+COMMENT ON COLUMN public.categorias_dre.codigo IS
+    'Codigo contabil (01=Vendas Produtos, 02=Vendas Servicos, 41=Descontos Concedidos, 51=Taxas Bancarias)';
 
 
 --
@@ -1004,11 +1008,15 @@ CREATE TABLE public.movimentacoes (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     tipo_origem character varying(30) DEFAULT 'MANUAL'::character varying,
     afeta_saldo boolean DEFAULT true NOT NULL,
+    afeta_dre boolean DEFAULT true NOT NULL,
     protegido boolean DEFAULT false NOT NULL,
-    CONSTRAINT chk_movimentacoes_tipo CHECK (((tipo)::text = ANY ((ARRAY['Entrada'::character varying, 'SaÃ­da'::character varying])::text[]))),
+    CONSTRAINT chk_movimentacoes_tipo CHECK (((tipo)::text = ANY ((ARRAY['Entrada'::character varying, 'Saida'::character varying])::text[]))),
     CONSTRAINT chk_movimentacoes_valor CHECK ((valor > (0)::numeric)),
-    CONSTRAINT chk_movimento_tipo_origem CHECK (((tipo_origem)::text = ANY ((ARRAY['MANUAL'::character varying, 'RECEBIMENTO'::character varying, 'PAGAMENTO'::character varying, 'ESTORNO'::character varying])::text[])))
+    CONSTRAINT chk_movimento_tipo_origem CHECK (((tipo_origem)::text = ANY ((ARRAY['MANUAL'::character varying, 'RECEBIMENTO'::character varying, 'PAGAMENTO'::character varying, 'ESTORNO'::character varying, 'VENDA_COMPETENCIA'::character varying, 'TAXA_CARTAO'::character varying, 'DEDUCAO'::character varying, 'TRIBUTO_VENDA'::character varying, 'CPV'::character varying, 'PDV'::character varying, 'VENDA'::character varying])::text[])))
 );
+
+COMMENT ON COLUMN public.movimentacoes.afeta_dre IS
+    'TRUE = lancamento aparece no DRE. Recebimentos/pagamentos de CR/CP tem afeta_dre=FALSE (apenas patrimonial).';
 
 
 --
@@ -3942,11 +3950,11 @@ INSERT INTO public.configuracoes VALUES (12, 'telefone_contato', '(11) 1234-5678
 --
 
 INSERT INTO public.formas_pagamento VALUES (1, 'Dinheiro', 'D', 'Pagamento em dinheiro', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
-INSERT INTO public.formas_pagamento VALUES (2, 'CartÃ£o de DÃ©bito', 'CD', 'CartÃ£o de DÃ©bito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.614791-03');
-INSERT INTO public.formas_pagamento VALUES (3, 'CartÃ£o de CrÃ©dito', 'CC', 'CartÃ£o de CrÃ©dito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.617959-03');
+INSERT INTO public.formas_pagamento VALUES (2, 'Cartão de Débito', 'CD', 'Cartão de Débito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.614791-03');
+INSERT INTO public.formas_pagamento VALUES (3, 'Cartão de Crédito', 'CC', 'Cartão de Crédito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.617959-03');
 INSERT INTO public.formas_pagamento VALUES (4, 'PIX', 'PIX', 'TransferÃªncia via PIX', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
 INSERT INTO public.formas_pagamento VALUES (5, 'Boleto', 'BOL', 'Boleto bancario', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
-INSERT INTO public.formas_pagamento VALUES (6, 'TransferÃªncia BancÃ¡ria', 'TB', 'Transferencia bancaria', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+INSERT INTO public.formas_pagamento VALUES (6, 'Transferência Bancaría', 'TB', 'Transferencia bancaria', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
 INSERT INTO public.formas_pagamento VALUES (7, 'A faturar', 'AF', 'Pagamento a prazo', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
 
 
@@ -4040,6 +4048,384 @@ INSERT INTO public.permissoes_nivel VALUES (1, 30);
 
 
 -- ============================================================================
+-- GRUPOS/SUBGRUPOS DE PRODUTO + CAMPOS FISCAIS ESTENDIDOS (auditoria 2026-04-18)
+-- Blocos idempotentes para clientes existentes
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS produto_grupos (
+    id              SERIAL PRIMARY KEY,
+    nome            VARCHAR(100) NOT NULL,
+    descricao       TEXT,
+    ativo           BOOLEAN NOT NULL DEFAULT TRUE,
+    criado_em       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_produto_grupos_nome UNIQUE (nome)
+);
+
+CREATE TABLE IF NOT EXISTS produto_subgrupos (
+    id              SERIAL PRIMARY KEY,
+    grupo_id        INTEGER NOT NULL REFERENCES produto_grupos(id) ON DELETE RESTRICT,
+    nome            VARCHAR(100) NOT NULL,
+    descricao       TEXT,
+    ativo           BOOLEAN NOT NULL DEFAULT TRUE,
+    criado_em       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_produto_subgrupos_grupo_nome UNIQUE (grupo_id, nome)
+);
+
+CREATE INDEX IF NOT EXISTS idx_produto_subgrupos_grupo_id ON produto_subgrupos(grupo_id);
+
+ALTER TABLE produtos
+    ADD COLUMN IF NOT EXISTS grupo_id         INTEGER REFERENCES produto_grupos(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS subgrupo_id      INTEGER REFERENCES produto_subgrupos(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS ncm              VARCHAR(10),
+    ADD COLUMN IF NOT EXISTS cest             VARCHAR(9),
+    ADD COLUMN IF NOT EXISTS cfop             VARCHAR(5),
+    ADD COLUMN IF NOT EXISTS origem_fiscal    SMALLINT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS icms_cst         VARCHAR(3),
+    ADD COLUMN IF NOT EXISTS icms_aliquota    NUMERIC(5,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS icms_base_calc   NUMERIC(5,2) DEFAULT 100,
+    ADD COLUMN IF NOT EXISTS icms_st_aliquota NUMERIC(5,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS icms_st_mva      NUMERIC(5,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS pis_cst          VARCHAR(3),
+    ADD COLUMN IF NOT EXISTS pis_aliquota     NUMERIC(5,4) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS cofins_cst       VARCHAR(3),
+    ADD COLUMN IF NOT EXISTS cofins_aliquota  NUMERIC(5,4) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS ipi_cst          VARCHAR(3),
+    ADD COLUMN IF NOT EXISTS ipi_aliquota     NUMERIC(5,2) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS peso_bruto       NUMERIC(10,3) DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS peso_liquido     NUMERIC(10,3) DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS idx_produtos_grupo_id    ON produtos(grupo_id);
+CREATE INDEX IF NOT EXISTS idx_produtos_subgrupo_id ON produtos(subgrupo_id);
+CREATE INDEX IF NOT EXISTS idx_produtos_ncm         ON produtos(ncm) WHERE ncm IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION produto_grupos_atualizar_em()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.atualizado_em := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_produto_grupos_updated    ON produto_grupos;
+DROP TRIGGER IF EXISTS trg_produto_subgrupos_updated ON produto_subgrupos;
+CREATE TRIGGER trg_produto_grupos_updated
+    BEFORE UPDATE ON produto_grupos
+    FOR EACH ROW EXECUTE FUNCTION produto_grupos_atualizar_em();
+CREATE TRIGGER trg_produto_subgrupos_updated
+    BEFORE UPDATE ON produto_subgrupos
+    FOR EACH ROW EXECUTE FUNCTION produto_grupos_atualizar_em();
+
+-- Grupos e subgrupos NAO sao populados no template: cada cliente cadastra
+-- os seus conforme necessidade (tabelas ficam vazias apos CREATE).
+
+-- clientes.prazo_faturamento_dias (auditoria 2026-04-18)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='clientes' AND column_name='prazo_faturamento_dias') THEN
+        ALTER TABLE clientes
+            ADD COLUMN prazo_faturamento_dias INTEGER NOT NULL DEFAULT 0
+                CONSTRAINT chk_clientes_prazo_faturamento CHECK (prazo_faturamento_dias >= 0);
+    END IF;
+END $$;
+
+-- View fallback para tabela `servicos` (removida na Fase 1, mas queries legadas
+-- do Dashboard ainda referenciam). Retorna zero linhas.
+DROP VIEW IF EXISTS servicos;
+CREATE VIEW servicos AS
+SELECT NULL::uuid AS id, NULL::integer AS numero, NULL::integer AS cliente_id,
+       NULL::varchar AS nome_cliente, NULL::varchar AS status,
+       NULL::timestamptz AS data_servico, NULL::numeric AS valor_total,
+       FALSE AS ativo, NULL::timestamptz AS updated_at,
+       NULL::varchar AS servico_nome, NULL::varchar AS produto_nome,
+       NULL::integer AS produto_id, NULL::numeric AS produto_quantidade,
+       NULL::numeric AS produto_valor_unitario, NULL::numeric AS servico_valor,
+       NULL::varchar AS desconto_tipo, NULL::numeric AS desconto_valor,
+       NULL::timestamptz AS data_faturamento, NULL::integer AS orcamento_id
+WHERE FALSE;
+
+-- ============================================================================
+-- MODULO FISCAL (NFC-e + NFS-e Nacional)  — migration 20260418_fiscal_module
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS perfil_tributario (
+    id                      SERIAL PRIMARY KEY,
+    empresa_local_id        INTEGER NOT NULL DEFAULT 1,
+    regime_tributario       VARCHAR(20) NOT NULL DEFAULT 'simples_nacional'
+                            CHECK (regime_tributario IN ('simples_nacional','lucro_presumido','lucro_real')),
+    csc_id_homologacao      VARCHAR(10),
+    csc_token_homologacao   VARCHAR(64),
+    csc_id_producao         VARCHAR(10),
+    csc_token_producao      VARCHAR(64),
+    serie_nfce              SMALLINT DEFAULT 1,
+    numero_nfce_atual       INTEGER DEFAULT 0,
+    ambiente_nfce           SMALLINT DEFAULT 2 CHECK (ambiente_nfce IN (1,2)),
+    nfse_modo_auth          VARCHAR(20) DEFAULT 'usuario_senha'
+                            CHECK (nfse_modo_auth IN ('usuario_senha','certificado','govbr')),
+    nfse_usuario            VARCHAR(100),
+    nfse_senha_cifrada      TEXT,
+    nfse_token              TEXT,
+    nfse_token_expira_em    TIMESTAMP,
+    nfse_certificado_path   VARCHAR(255),
+    nfse_certificado_senha_cifrada TEXT,
+    serie_rps               VARCHAR(5)  DEFAULT 'RPS',
+    numero_rps_atual        INTEGER     DEFAULT 0,
+    ambiente_nfse           VARCHAR(15) DEFAULT 'homologacao'
+                            CHECK (ambiente_nfse IN ('homologacao','producao')),
+    ativo                   BOOLEAN DEFAULT TRUE,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_perfil_empresa UNIQUE (empresa_local_id)
+);
+
+COMMENT ON TABLE perfil_tributario IS
+    'Perfil tributario 1:1 com empresa_local. Senhas cifradas com chave do .env (FISCAL_ENCRYPTION_KEY).';
+
+CREATE TABLE IF NOT EXISTS tributacao_por_estado (
+    id                    SERIAL PRIMARY KEY,
+    perfil_id             INTEGER NOT NULL REFERENCES perfil_tributario(id) ON DELETE CASCADE,
+    uf_origem             CHAR(2) NOT NULL,
+    uf_destino            CHAR(2) NOT NULL,
+    icms_aliquota         NUMERIC(5,2) DEFAULT 0,
+    icms_aliquota_inter   NUMERIC(5,2) DEFAULT 0,
+    icms_reducao_bc       NUMERIC(5,2) DEFAULT 0,
+    icms_diferimento      NUMERIC(5,2) DEFAULT 0,
+    difal_aliquota        NUMERIC(5,2) DEFAULT 0,
+    difal_partilha_dest   NUMERIC(5,2) DEFAULT 100,
+    fcp_aliquota          NUMERIC(5,2) DEFAULT 0,
+    simples_anexo         SMALLINT,
+    simples_aliquota      NUMERIC(5,2) DEFAULT 0,
+    simples_deducao       NUMERIC(10,2) DEFAULT 0,
+    ativo                 BOOLEAN DEFAULT TRUE,
+    created_at            TIMESTAMPTZ DEFAULT NOW(),
+    updated_at            TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_trib_ufs UNIQUE (perfil_id, uf_origem, uf_destino)
+);
+CREATE INDEX IF NOT EXISTS idx_trib_perfil_ufs
+    ON tributacao_por_estado(perfil_id, uf_origem, uf_destino);
+
+CREATE TABLE IF NOT EXISTS fiscal_nfce (
+    id                  SERIAL PRIMARY KEY,
+    venda_id            INTEGER NOT NULL REFERENCES pdv_vendas(id) ON DELETE RESTRICT,
+    numero              INTEGER NOT NULL,
+    serie               SMALLINT NOT NULL DEFAULT 1,
+    chave_acesso        CHAR(44),
+    protocolo           VARCHAR(20),
+    xml_enviado         TEXT,
+    xml_retorno         TEXT,
+    xml_autorizado      TEXT,
+    status              VARCHAR(20) NOT NULL DEFAULT 'pendente'
+                        CHECK (status IN ('pendente','autorizada','cancelada','rejeitada','contingencia')),
+    ambiente            SMALLINT NOT NULL DEFAULT 2,
+    valor_total         NUMERIC(12,2),
+    data_emissao        TIMESTAMPTZ DEFAULT NOW(),
+    data_autorizacao    TIMESTAMPTZ,
+    motivo_rejeicao     TEXT,
+    qrcode_url          TEXT,
+    danfe_path          TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nfce_venda  ON fiscal_nfce(venda_id);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nfce_status ON fiscal_nfce(status);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nfce_chave  ON fiscal_nfce(chave_acesso);
+
+CREATE TABLE IF NOT EXISTS fiscal_nfse (
+    id                  SERIAL PRIMARY KEY,
+    venda_id            INTEGER NOT NULL REFERENCES pdv_vendas(id) ON DELETE RESTRICT,
+    numero_rps          INTEGER NOT NULL,
+    serie_rps           VARCHAR(5) DEFAULT 'RPS',
+    numero_nfse         VARCHAR(20),
+    codigo_verificacao  VARCHAR(50),
+    xml_rps_enviado     TEXT,
+    xml_nfse_retorno    TEXT,
+    status              VARCHAR(20) NOT NULL DEFAULT 'pendente'
+                        CHECK (status IN ('pendente','autorizada','cancelada','rejeitada','processando')),
+    ambiente            VARCHAR(15) DEFAULT 'homologacao',
+    valor_servicos      NUMERIC(12,2),
+    valor_iss           NUMERIC(12,2),
+    aliquota_iss        NUMERIC(5,2),
+    codigo_servico      VARCHAR(10),
+    discriminacao       TEXT,
+    data_emissao        TIMESTAMPTZ DEFAULT NOW(),
+    data_autorizacao    TIMESTAMPTZ,
+    motivo_rejeicao     TEXT,
+    link_nfse           TEXT,
+    pdf_path            TEXT,
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nfse_venda  ON fiscal_nfse(venda_id);
+CREATE INDEX IF NOT EXISTS idx_fiscal_nfse_status ON fiscal_nfse(status);
+
+CREATE TABLE IF NOT EXISTS fiscal_servicos_config (
+    id                  SERIAL PRIMARY KEY,
+    servico_id          INTEGER REFERENCES servicos_catalogo(id) ON DELETE CASCADE,
+    codigo_lc116        VARCHAR(10) NOT NULL,
+    descricao_lc116     VARCHAR(255),
+    cnae                VARCHAR(10),
+    codigo_municipio    VARCHAR(10),
+    iss_aliquota        NUMERIC(5,2) DEFAULT 0,
+    iss_retido          BOOLEAN DEFAULT FALSE,
+    pis_aliquota        NUMERIC(5,4) DEFAULT 0,
+    cofins_aliquota     NUMERIC(5,4) DEFAULT 0,
+    csll_aliquota       NUMERIC(5,4) DEFAULT 0,
+    ir_aliquota         NUMERIC(5,4) DEFAULT 0,
+    inss_aliquota       NUMERIC(5,4) DEFAULT 0,
+    ativo               BOOLEAN DEFAULT TRUE,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_fsc_servico UNIQUE (servico_id)
+);
+CREATE INDEX IF NOT EXISTS idx_fsc_servico ON fiscal_servicos_config(servico_id);
+
+CREATE OR REPLACE FUNCTION fiscal_touch_updated_at() RETURNS trigger AS $fiscal_touch$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$fiscal_touch$ LANGUAGE plpgsql;
+
+DO $fiscal_triggers$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_perfil_tributario_touch') THEN
+        CREATE TRIGGER trg_perfil_tributario_touch BEFORE UPDATE ON perfil_tributario
+            FOR EACH ROW EXECUTE FUNCTION fiscal_touch_updated_at();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_tributacao_touch') THEN
+        CREATE TRIGGER trg_tributacao_touch BEFORE UPDATE ON tributacao_por_estado
+            FOR EACH ROW EXECUTE FUNCTION fiscal_touch_updated_at();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_fsc_touch') THEN
+        CREATE TRIGGER trg_fsc_touch BEFORE UPDATE ON fiscal_servicos_config
+            FOR EACH ROW EXECUTE FUNCTION fiscal_touch_updated_at();
+    END IF;
+END $fiscal_triggers$;
+
+-- Seed: perfil_tributario singleton
+INSERT INTO perfil_tributario (empresa_local_id, regime_tributario)
+SELECT 1, 'simples_nacional'
+WHERE NOT EXISTS (SELECT 1 FROM perfil_tributario WHERE empresa_local_id = 1);
+
+-- Seed: tributacao_por_estado com todas as 27 UFs (aliquota inter default)
+DO $fiscal_seed$
+DECLARE
+    perfilId   INTEGER;
+    ufEmit     CHAR(2);
+    aliqInter  NUMERIC(5,2);
+    rec        RECORD;
+BEGIN
+    SELECT id INTO perfilId FROM perfil_tributario WHERE empresa_local_id = 1 LIMIT 1;
+    SELECT UPPER(COALESCE(uf, 'SP'))::CHAR(2) INTO ufEmit FROM empresa_local WHERE id = 1;
+    IF perfilId IS NULL THEN RETURN; END IF;
+    IF ufEmit IS NULL OR ufEmit = '' THEN ufEmit := 'SP'; END IF;
+    FOR rec IN
+        SELECT uf FROM (VALUES
+            ('AC'),('AL'),('AM'),('AP'),('BA'),('CE'),('DF'),('ES'),('GO'),('MA'),
+            ('MG'),('MS'),('MT'),('PA'),('PB'),('PE'),('PI'),('PR'),('RJ'),('RN'),
+            ('RO'),('RR'),('RS'),('SC'),('SE'),('SP'),('TO')
+        ) AS t(uf)
+    LOOP
+        aliqInter := 12.0;
+        IF ufEmit IN ('SP','RJ','MG','RS','SC','PR','ES') AND
+           rec.uf NOT IN ('SP','RJ','MG','RS','SC','PR','ES') THEN
+            aliqInter := 7.0;
+        END IF;
+        IF ufEmit = rec.uf THEN aliqInter := 0; END IF;
+        INSERT INTO tributacao_por_estado
+            (perfil_id, uf_origem, uf_destino, icms_aliquota_inter)
+        VALUES (perfilId, ufEmit, rec.uf, aliqInter)
+        ON CONFLICT (perfil_id, uf_origem, uf_destino) DO NOTHING;
+    END LOOP;
+END $fiscal_seed$;
+
+-- ============================================================================
+-- DRE POR REGIME DE COMPETENCIA (2026-04-19) — seeds e normalizacoes
+-- Receita reconhecida na venda, taxas cartao como Despesa Financeira,
+-- recebimentos NAO afetam DRE (afeta_dre=FALSE).
+-- ============================================================================
+
+-- Re-tipagem: "Descontos Cedidos" eh Deducao, nao Despesa Operacional
+UPDATE categorias_dre
+   SET tipo = 'Deducao'
+ WHERE UPPER(nome) LIKE '%DESCONTO%CEDIDO%'
+    OR UPPER(nome) LIKE '%DESCONTO%CONCEDIDO%';
+
+-- Seed de codigos contabeis (ignora categorias ja codificadas)
+UPDATE categorias_dre SET codigo = '01' WHERE codigo IS NULL AND LOWER(nome) = 'vendas de produtos';
+UPDATE categorias_dre SET codigo = '02' WHERE codigo IS NULL AND LOWER(nome) = 'vendas de servicos';
+UPDATE categorias_dre SET codigo = '03' WHERE codigo IS NULL AND LOWER(nome) = 'receitas financeiras';
+UPDATE categorias_dre SET codigo = '04' WHERE codigo IS NULL AND LOWER(nome) = 'outras receitas operacionais';
+UPDATE categorias_dre SET codigo = '05' WHERE codigo IS NULL AND LOWER(nome) = 'icms sobre vendas';
+UPDATE categorias_dre SET codigo = '06' WHERE codigo IS NULL AND LOWER(nome) = 'ipi sobre vendas';
+UPDATE categorias_dre SET codigo = '07' WHERE codigo IS NULL AND LOWER(nome) = 'pis sobre vendas';
+UPDATE categorias_dre SET codigo = '08' WHERE codigo IS NULL AND LOWER(nome) = 'cofins sobre vendas';
+UPDATE categorias_dre SET codigo = '09' WHERE codigo IS NULL AND LOWER(nome) = 'iss sobre servicos';
+UPDATE categorias_dre SET codigo = '10' WHERE codigo IS NULL AND LOWER(nome) = 'devolucoes de vendas';
+UPDATE categorias_dre SET codigo = '11' WHERE codigo IS NULL AND LOWER(nome) = 'abatimentos comerciais';
+UPDATE categorias_dre SET codigo = '13' WHERE codigo IS NULL AND LOWER(nome) = 'custo de mercadorias vendidas - cmv';
+UPDATE categorias_dre SET codigo = '14' WHERE codigo IS NULL AND LOWER(nome) = 'custo de produtos vendidos - cpv';
+UPDATE categorias_dre SET codigo = '41' WHERE codigo IS NULL AND (UPPER(nome) LIKE '%DESCONTO%CEDIDO%' OR UPPER(nome) LIKE '%DESCONTO%CONCEDIDO%');
+UPDATE categorias_dre SET codigo = '51' WHERE codigo IS NULL AND (LOWER(nome) LIKE 'taxas bancarias%' OR LOWER(nome) LIKE 'taxas banc%');
+UPDATE categorias_dre SET codigo = '52' WHERE codigo IS NULL AND LOWER(nome) = 'juros passivos';
+UPDATE categorias_dre SET codigo = '53' WHERE codigo IS NULL AND LOWER(nome) = 'variacoes cambiais';
+UPDATE categorias_dre SET codigo = '90' WHERE codigo IS NULL AND LOWER(nome) = 'imposto de renda - pj';
+UPDATE categorias_dre SET codigo = '91' WHERE codigo IS NULL AND LOWER(nome) = 'contribuicao social - csll';
+
+-- Sincroniza sequences apos INSERTs posicionais (cliente-base usa IDs explicitos)
+SELECT setval(pg_get_serial_sequence('categorias_dre','id'),
+              COALESCE((SELECT MAX(id) FROM categorias_dre), 1));
+
+-- Garante existencia das categorias contabeis chave
+INSERT INTO categorias_dre (nome, tipo, codigo, descricao, ordem, ativo)
+SELECT 'Vendas de Produtos', 'Receita', '01', 'Receita bruta reconhecida na venda de produtos (competencia)', 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM categorias_dre WHERE LOWER(nome) = 'vendas de produtos');
+
+INSERT INTO categorias_dre (nome, tipo, codigo, descricao, ordem, ativo)
+SELECT 'Vendas de Servicos', 'Receita', '02', 'Receita bruta reconhecida na venda de servicos (competencia)', 2, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM categorias_dre WHERE LOWER(nome) = 'vendas de servicos');
+
+INSERT INTO categorias_dre (nome, tipo, codigo, descricao, ordem, ativo)
+SELECT 'Descontos Concedidos', 'Deducao', '41', 'Descontos concedidos ao cliente no ato da venda', 41, TRUE
+WHERE NOT EXISTS (
+    SELECT 1 FROM categorias_dre
+     WHERE codigo = '41'
+        OR UPPER(nome) LIKE '%DESCONTO%CEDIDO%'
+        OR UPPER(nome) LIKE '%DESCONTO%CONCEDIDO%'
+);
+
+INSERT INTO categorias_dre (nome, tipo, codigo, descricao, ordem, ativo)
+SELECT 'Taxas Bancarias', 'Despesa Financeira', '51', 'Taxas cobradas por operadoras de cartao e bancos', 51, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM categorias_dre WHERE LOWER(nome) LIKE 'taxas bancarias%' OR LOWER(nome) LIKE 'taxas banc%');
+
+-- Indices parciais para o DRE competencia
+CREATE INDEX IF NOT EXISTS idx_mov_dre_periodo
+    ON public.movimentacoes (data_movimentacao)
+ WHERE afeta_dre = TRUE;
+CREATE INDEX IF NOT EXISTS idx_mov_categoria_periodo
+    ON public.movimentacoes (categoria_dre_id, data_movimentacao)
+ WHERE afeta_dre = TRUE;
+
+-- ============================================================================
+-- REGISTRY DE MIGRATIONS APLICADAS (referencial para futuros upgrades)
+-- ============================================================================
+INSERT INTO schema_migrations (version, checksum, executed_at) VALUES
+    ('20260418_audit_remove_orcamento_servicos_fiscalservico', MD5('20260418_audit'), NOW()),
+    ('20260418_auditoria_final',                               MD5('20260418_auditoria_final'), NOW()),
+    ('20260418_clientes_prazo_faturamento',                    MD5('20260418_clientes_prazo_faturamento'), NOW()),
+    ('20260418_financeiro_protegido',                          MD5('20260418_financeiro_protegido'), NOW()),
+    ('20260418_fiscal_module',                                 MD5('20260418_fiscal_module'), NOW()),
+    ('20260418_pdv_conferencia',                               MD5('20260418_pdv_conferencia'), NOW()),
+    ('20260418_pdv_fluxo_vendas',                              MD5('20260418_pdv_fluxo_vendas'), NOW()),
+    ('20260418_pdv_vendas_kanban',                             MD5('20260418_pdv_vendas_kanban'), NOW()),
+    ('20260418_pdv_vendas_module',                             MD5('20260418_pdv_vendas_module'), NOW()),
+    ('20260418_produto_grupos_fiscal',                         MD5('20260418_produto_grupos_fiscal'), NOW()),
+    ('20260418_view_servicos_fallback',                        MD5('20260418_view_servicos_fallback'), NOW()),
+    ('20260418_vw_dre',                                        MD5('20260418_vw_dre'), NOW()),
+    ('20260419_dre_competencia',                               MD5('20260419_dre_competencia'), NOW())
+ON CONFLICT (version) DO NOTHING;
+
+-- ============================================================================
 -- USUARIO ADMIN PADRAO (senha: admin123)
 -- ============================================================================
 INSERT INTO usuarios (nome, email, senha, nivel_acesso_id, ativo)
@@ -4055,6 +4441,5 @@ BEGIN
     RAISE NOTICE '================================================================';
     RAISE NOTICE 'Banco de dados do Sistema DM criado com sucesso.';
     RAISE NOTICE 'Usuario admin: admin@suporte.com  /  Senha: admin123';
-    RAISE NOTICE 'Lembre-se de trocar a senha do admin apos o primeiro login.';
     RAISE NOTICE '================================================================';
 END $dm_final$;

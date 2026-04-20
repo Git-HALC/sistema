@@ -61,18 +61,17 @@ final class PdvPermissao
             return true;
         }
 
+        // Operador pode ver o relatório do proprio caixa, aberto ou fechado.
         $stmt = $this->pdo->prepare(
             'SELECT 1
                FROM pdv_caixas
               WHERE id = :id
                 AND usuario_abertura_id = :usuario_id
-                AND status = :status
               LIMIT 1'
         );
         $stmt->execute([
             ':id' => $caixaId,
             ':usuario_id' => $usuarioId,
-            ':status' => 'fechado',
         ]);
 
         return (bool) $stmt->fetchColumn();

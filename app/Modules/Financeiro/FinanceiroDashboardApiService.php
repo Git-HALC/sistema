@@ -27,6 +27,17 @@ class FinanceiroDashboardApiService
         $inadimplenciaAtual = $this->inadimplenciaEmAberto();
         $inadimplenciaAnterior = $this->inadimplenciaEmAberto($previousMonthEnd);
 
+        // Saldo consolidado atual de todas as contas bancarias ativas.
+        // Este e o "Saldo do periodo" exibido no dashboard — sempre reflete
+        // a posicao corrente somada, nao um delta do periodo.
+        $saldoAtualContas = (float)$this->pdo->query(
+            'SELECT COALESCE(SUM(saldo_atual), 0) FROM contas WHERE ativo = TRUE'
+        )->fetchColumn();
+
+        // Para manter variacao vs mes anterior coerente, reconstitui o saldo
+        // ao final do mes anterior: saldo_atual - (receitas_mes_atual - despesas_mes_atual).
+        $saldoFechamentoMesAnterior = $saldoAtualContas - ($current['receitas'] - $current['despesas']);
+
         return [
             'periodo' => [
                 'inicio' => $currentMonthStart,
@@ -50,10 +61,10 @@ class FinanceiroDashboardApiService
                     'sparkline' => $this->dailyFluxoSparkline('despesas'),
                 ],
                 'lucro' => [
-                    'valor' => $current['lucro'],
-                    'variacao_percentual' => $this->percentChange($current['lucro'], $previous['lucro']),
-                    'variacao_absoluta' => round($current['lucro'] - $previous['lucro'], 2),
-                    'referencia' => 'vs mes anterior',
+                    'valor' => round($saldoAtualContas, 2),
+                    'variacao_percentual' => $this->percentChange($saldoAtualContas, $saldoFechamentoMesAnterior),
+                    'variacao_absoluta' => round($saldoAtualContas - $saldoFechamentoMesAnterior, 2),
+                    'referencia' => 'saldo consolidado das contas',
                     'sparkline' => $this->dailyFluxoSparkline('lucro'),
                 ],
                 'inadimplencia' => [
@@ -181,6 +192,152 @@ class FinanceiroDashboardApiService
         ];
     }
 
+    public function getDreResumido(?string $inicio = null, ?string $fim = null): array
+    {
+        [$ini, $fimR] = $this->resolveRange($inicio, $fim);
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $dre = $repo->dreResumido($ini, $fimR);
+        return [
+            'inicio' => $ini,
+            'fim' => $fimR,
+            'valores' => array_map(static fn ($v) => round((float)$v, 2), $dre),
+        ];
+    }
+
+    public function getFluxoSemanal(?string $inicio = null, ?string $fim = null): array
+    {
+        [$ini, $fimR] = $this->resolveRange($inicio, $fim);
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $rows = $repo->fluxoSemanal($ini, $fimR);
+
+        $labels = [];
+        $receitas = [];
+        $despesas = [];
+        foreach ($rows as $r) {
+            $labels[] = (string)$r['semana'];
+            $receitas[] = round((float)$r['receitas'], 2);
+            $despesas[] = round((float)$r['despesas'], 2);
+        }
+        return [
+            'inicio' => $ini,
+            'fim' => $fimR,
+            'labels' => $labels,
+            'series' => [
+                'receitas' => $receitas,
+                'despesas' => $despesas,
+            ],
+        ];
+    }
+
+    public function getCrPorVencimento(): array
+    {
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $rows = $repo->crPorVencimento();
+        return [
+            'labels' => array_map(static fn ($r) => (string)$r['faixa'], $rows),
+            'totais' => array_map(static fn ($r) => round((float)$r['total'], 2), $rows),
+        ];
+    }
+
+    public function getPorCategoria(string $tipo, ?string $inicio = null, ?string $fim = null): array
+    {
+        [$ini, $fimR] = $this->resolveRange($inicio, $fim);
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $rows = $tipo === 'receita'
+            ? $repo->receitasPorCategoria($ini, $fimR)
+            : $repo->despesasPorCategoria($ini, $fimR);
+
+        return [
+            'tipo' => $tipo,
+            'inicio' => $ini,
+            'fim' => $fimR,
+            'labels' => array_map(static fn ($r) => (string)$r['categoria'], $rows),
+            'totais' => array_map(static fn ($r) => round((float)$r['total'], 2), $rows),
+        ];
+    }
+
+    public function getRecebimentosPorForma(?string $inicio = null, ?string $fim = null): array
+    {
+        [$ini, $fimR] = $this->resolveRange($inicio, $fim);
+        $rows = (new DashboardFinanceiroRepository($this->pdo))->recebimentosPorForma($ini, $fimR);
+        return [
+            'inicio' => $ini,
+            'fim' => $fimR,
+            'labels' => array_map(static fn ($r) => $r['forma'], $rows),
+            'totais' => array_map(static fn ($r) => $r['total'], $rows),
+            'tipos' => array_map(static fn ($r) => $r['tipo'], $rows),
+            'quantidades' => array_map(static fn ($r) => $r['quantidade'], $rows),
+            'total_geral' => round(array_sum(array_column($rows, 'total')), 2),
+        ];
+    }
+
+    public function getSaldoContas(): array
+    {
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $rows = $repo->saldoContas();
+        $total = array_sum(array_map(static fn ($r) => (float)$r['saldo_atual'], $rows));
+        return [
+            'total' => round($total, 2),
+            'contas' => array_map(static fn ($r) => [
+                'id' => (int)$r['id'],
+                'nome' => (string)$r['nome'],
+                'tipo' => (string)$r['tipo'],
+                'banco' => (string)($r['banco'] ?? ''),
+                'saldo_atual' => round((float)$r['saldo_atual'], 2),
+            ], $rows),
+        ];
+    }
+
+    public function getContasPagarPorVencimento(): array
+    {
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $rows = $repo->contasPagarPorVencimento();
+        return [
+            'labels' => array_map(static fn ($r) => (string)$r['faixa'], $rows),
+            'totais' => array_map(static fn ($r) => round((float)$r['total'], 2), $rows),
+        ];
+    }
+
+    public function getUltimosLancamentos(int $limite = 10): array
+    {
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $rows = $repo->ultimosLancamentos($limite);
+        return [
+            'items' => array_map(static fn ($r) => [
+                'id' => (int)$r['id'],
+                'tipo' => (string)$r['tipo'],
+                'valor' => round((float)$r['valor'], 2),
+                'descricao' => (string)($r['descricao'] ?? ''),
+                'data' => (string)$r['data_movimentacao'],
+                'conta' => (string)($r['conta_nome'] ?? ''),
+                'categoria' => (string)($r['categoria_nome'] ?? ''),
+                'protegido' => (bool)$r['protegido'],
+            ], $rows),
+        ];
+    }
+
+    public function getProjecaoMes(): array
+    {
+        $repo = new DashboardFinanceiroRepository($this->pdo);
+        $p = $repo->projecaoMesAtual();
+        return [
+            'realizado' => round((float)$p['realizado'], 2),
+            'projecao' => round((float)$p['projecao'], 2),
+            'dias_passados' => (int)$p['dias_passados'],
+            'dias_mes' => (int)$p['dias_mes'],
+        ];
+    }
+
+    private function resolveRange(?string $inicio, ?string $fim): array
+    {
+        if (!$inicio || !$fim) {
+            $hoje = new DateTimeImmutable('today');
+            $inicio = $hoje->modify('first day of this month')->format('Y-m-d');
+            $fim = $hoje->modify('last day of this month')->format('Y-m-d');
+        }
+        return [$inicio, $fim];
+    }
+
     public function getHeatmap(int $year): array
     {
         $year = max(2020, min(2100, $year));
@@ -246,8 +403,13 @@ class FinanceiroDashboardApiService
 
         $formasPagamento = (new FormaPagamentoRepository($this->pdo))->listar(true);
         $contasBancarias = (new ContaRepository($this->pdo))->listar(true);
-        $categoriasReceita = (new CategoriaDreRepository($this->pdo))->listar('RECEITA', true);
-        $categoriasDespesa = (new CategoriaDreRepository($this->pdo))->listar('DESPESA', true);
+        // Tipos reais em categorias_dre (CHECK do banco, case-sensitive):
+        // 'Receita','Despesa','Deducao','CPV','Despesa Operacional','Despesa Financeira','Tributo','Outras'
+        $categoriasReceita = (new CategoriaDreRepository($this->pdo))->listar(['Receita'], true);
+        $categoriasDespesa = (new CategoriaDreRepository($this->pdo))->listar(
+            ['Despesa', 'Despesa Operacional', 'Despesa Financeira', 'CPV', 'Tributo'],
+            true
+        );
 
         return [
             'contas_receber' => $receber,
@@ -529,14 +691,17 @@ class FinanceiroDashboardApiService
 
     private function fluxoResumo(string $start, string $end): array
     {
+        // Fonte unica: movimentacoes afeta_saldo=TRUE.
+        // Antes este metodo somava direto de contas_receber.valor_pago, duplicando
+        // com a movimentacao gerada pela baixa.
         $stmt = $this->pdo->prepare("
-            WITH fluxo AS (
-                {$this->fluxoBaseSql()}
-            )
             SELECT
-                COALESCE(SUM(CASE WHEN fluxo.tipo = 'receita' THEN fluxo.valor ELSE 0 END), 0) AS receitas,
-                COALESCE(SUM(CASE WHEN fluxo.tipo = 'despesa' THEN fluxo.valor ELSE 0 END), 0) AS despesas
-            FROM fluxo
+                COALESCE(SUM(CASE WHEN tipo = 'Entrada' THEN valor ELSE 0 END), 0) AS receitas,
+                COALESCE(SUM(CASE WHEN tipo = 'Saida'   THEN valor ELSE 0 END), 0) AS despesas
+              FROM movimentacoes
+             WHERE afeta_saldo = TRUE
+               AND data_movimentacao >= CAST(:inicio AS date)
+               AND data_movimentacao < (CAST(:fim AS date) + INTERVAL '1 day')
         ");
         $stmt->execute([
             ':inicio' => $start,
