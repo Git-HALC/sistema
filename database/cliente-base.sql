@@ -1005,6 +1005,7 @@ CREATE TABLE public.movimentacoes (
     conta_receber_id integer,
     conta_pagar_id integer,
     pedido_id uuid,
+    pdv_venda_id integer,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     tipo_origem character varying(30) DEFAULT 'MANUAL'::character varying,
     afeta_saldo boolean DEFAULT true NOT NULL,
@@ -2017,7 +2018,7 @@ CREATE VIEW public.vw_dre AS
                 END) AS total_entrada,
             sum(
                 CASE
-                    WHEN ((movimentacoes.tipo)::text = 'Saída'::text) THEN movimentacoes.valor
+                    WHEN ((movimentacoes.tipo)::text = 'Saida'::text) THEN movimentacoes.valor
                     ELSE (0)::numeric
                 END) AS total_saida
            FROM public.movimentacoes
@@ -3918,7 +3919,7 @@ INSERT INTO public.categorias_dre VALUES (34, 'Despesas de Viagem (Cafe da Manha
 INSERT INTO public.categorias_dre VALUES (35, 'Despesas de Viagem (Abastecimentos)', 'Despesa Operacional', 'Despesas com abastecimento de veiculos em viagens', 28, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
 INSERT INTO public.categorias_dre VALUES (36, 'Uso e Consumo', 'Despesa Operacional', 'Despesas com uso e consumo de materiais', 29, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
 INSERT INTO public.categorias_dre VALUES (37, 'Juros Passivos', 'Despesa Financeira', 'Juros pagos sobre emprastimos e financiamentos', 50, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
-INSERT INTO public.categorias_dre VALUES (38, 'Taxas BancÃ¡rias', 'Despesa Financeira', 'Taxas e tarifas BancÃ¡rias', 51, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
+INSERT INTO public.categorias_dre VALUES (38, 'Taxas Bancarias', 'Despesa Financeira', 'Taxas e tarifas bancarias', 51, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
 INSERT INTO public.categorias_dre VALUES (39, 'Variacoes Cambiais', 'Despesa Financeira', 'Perdas com variacao cambial', 52, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
 INSERT INTO public.categorias_dre VALUES (40, 'Descontos Cedidos em Vendas', 'Despesa Operacional', 'Descontos concedidos em operacoes de venda', 37, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
 INSERT INTO public.categorias_dre VALUES (41, 'Imposto de Renda - PJ', 'Tributo', 'Imposto de Renda Pessoa Juridica', 60, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
@@ -3952,9 +3953,9 @@ INSERT INTO public.configuracoes VALUES (12, 'telefone_contato', '(11) 1234-5678
 INSERT INTO public.formas_pagamento VALUES (1, 'Dinheiro', 'D', 'Pagamento em dinheiro', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-17 21:18:30.954396-03');
 INSERT INTO public.formas_pagamento VALUES (2, 'Cartão de Débito', 'CD', 'Cartão de Débito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.614791-03');
 INSERT INTO public.formas_pagamento VALUES (3, 'Cartão de Crédito', 'CC', 'Cartão de Crédito', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.617959-03');
-INSERT INTO public.formas_pagamento VALUES (4, 'PIX', 'PIX', 'TransferÃªncia via PIX', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+INSERT INTO public.formas_pagamento VALUES (4, 'PIX', 'PIX', 'Transferencia via PIX', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
 INSERT INTO public.formas_pagamento VALUES (5, 'Boleto', 'BOL', 'Boleto bancario', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
-INSERT INTO public.formas_pagamento VALUES (6, 'Transferência Bancaría', 'TB', 'Transferencia bancaria', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
+INSERT INTO public.formas_pagamento VALUES (6, 'Transferencia Bancaria', 'TB', 'Transferencia bancaria', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
 INSERT INTO public.formas_pagamento VALUES (7, 'A faturar', 'AF', 'Pagamento a prazo', NULL, 0.0000, 0, NULL, true, '2026-04-17 21:18:30.954396-03', '2026-04-18 17:01:00.618957-03');
 
 
@@ -4406,6 +4407,21 @@ CREATE INDEX IF NOT EXISTS idx_mov_categoria_periodo
     ON public.movimentacoes (categoria_dre_id, data_movimentacao)
  WHERE afeta_dre = TRUE;
 
+-- 2026-04-20 — FK e unique parcial de VENDA_COMPETENCIA (idempotencia)
+DO $fiscal_mov_venda$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints
+                   WHERE table_name='movimentacoes' AND constraint_name='movimentacoes_pdv_venda_id_fkey') THEN
+        ALTER TABLE public.movimentacoes
+            ADD CONSTRAINT movimentacoes_pdv_venda_id_fkey
+            FOREIGN KEY (pdv_venda_id) REFERENCES public.pdv_vendas(id) ON DELETE SET NULL;
+    END IF;
+END $fiscal_mov_venda$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_mov_venda_competencia
+    ON public.movimentacoes (pdv_venda_id, tipo_origem)
+ WHERE pdv_venda_id IS NOT NULL AND tipo_origem = 'VENDA_COMPETENCIA';
+
 -- ============================================================================
 -- REGISTRY DE MIGRATIONS APLICADAS (referencial para futuros upgrades)
 -- ============================================================================
@@ -4422,7 +4438,8 @@ INSERT INTO schema_migrations (version, checksum, executed_at) VALUES
     ('20260418_produto_grupos_fiscal',                         MD5('20260418_produto_grupos_fiscal'), NOW()),
     ('20260418_view_servicos_fallback',                        MD5('20260418_view_servicos_fallback'), NOW()),
     ('20260418_vw_dre',                                        MD5('20260418_vw_dre'), NOW()),
-    ('20260419_dre_competencia',                               MD5('20260419_dre_competencia'), NOW())
+    ('20260419_dre_competencia',                               MD5('20260419_dre_competencia'), NOW()),
+    ('20260420_mov_venda_id_dedup',                            MD5('20260420_mov_venda_id_dedup'), NOW())
 ON CONFLICT (version) DO NOTHING;
 
 -- ============================================================================

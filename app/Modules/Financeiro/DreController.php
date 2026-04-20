@@ -11,9 +11,11 @@ class DreController
     private const ROLES_PERMITIDOS = [1, 3];
 
     private DreService $service;
+    private PDO $pdo;
 
     public function __construct(PDO $pdo)
     {
+        $this->pdo = $pdo;
         $this->service = new DreService(new DreRepository($pdo));
         $this->verificarAutenticacao();
     }
